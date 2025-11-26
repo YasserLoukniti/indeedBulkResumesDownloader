@@ -17,7 +17,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.chrome.service import Service
 import chromedriver_autoinstaller
 from tqdm import tqdm
@@ -277,11 +277,12 @@ Appuyez sur Entrée quand c'est fait...
     def download_cv(self) -> bool:
         """Download CV for current candidate - optimized for speed"""
         try:
-            # Get candidate name from the list (faster than waiting for full page load)
-            print("   🔍 Récupération du nom depuis la liste...")
-            candidate_name = self._get_selected_candidate_name_from_list()
+            # Get candidate name from the page (name plate on the right side)
+            candidate_name = self.driver.execute_script("""
+                const nameEl = document.querySelector('[data-testid="name-plate-name-item"] span');
+                return nameEl ? nameEl.textContent.trim() : null;
+            """)
             if not candidate_name:
-                print("   🔍 Nom non trouvé dans liste, attente du chargement page...")
                 candidate_name = self.get_current_candidate_name()
 
             if not candidate_name:
@@ -301,26 +302,38 @@ Appuyez sur Entrée quand c'est fait...
             print("   🔍 Recherche du bouton CV...")
             download_link = None
 
-            # Quick check for both versions using XPath OR condition
-            try:
-                download_link = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((
-                        By.XPATH,
-                        "//a[text()='Download resume' or text()='Télécharger le CV']"
-                    ))
-                )
-                print(f"   ✅ Bouton trouvé: '{download_link.text}'")
-            except TimeoutException:
-                print(f"   ⚠️ Aucun bouton CV trouvé après 5s")
-                self.stats['failed_downloads'] += 1
-                return False
+            # Retry logic for stale element
+            for attempt in range(3):
+                try:
+                    download_link = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((
+                            By.XPATH,
+                            "//a[text()='Download resume' or text()='Télécharger le CV']"
+                        ))
+                    )
+                    print(f"   ✅ Bouton trouvé: '{download_link.text}'")
 
-            # Scroll into view and click
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", download_link)
-            time.sleep(0.2)
-            print("   🖱️ Clic sur le bouton...")
-            self.driver.execute_script("arguments[0].click();", download_link)
-            print("   ✅ Clic effectué!")
+                    # Scroll into view and click
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", download_link)
+                    time.sleep(0.2)
+                    print("   🖱️ Clic sur le bouton...")
+                    self.driver.execute_script("arguments[0].click();", download_link)
+                    print("   ✅ Clic effectué!")
+                    break  # Success, exit retry loop
+
+                except StaleElementReferenceException:
+                    if attempt < 2:
+                        print(f"   ⚠️ Element périmé, nouvelle tentative ({attempt + 2}/3)...")
+                        time.sleep(0.5)
+                    else:
+                        print(f"   ⚠️ Element périmé après 3 tentatives")
+                        self.stats['failed_downloads'] += 1
+                        return False
+
+                except TimeoutException:
+                    print(f"   ⚠️ Aucun bouton CV trouvé après 5s")
+                    self.stats['failed_downloads'] += 1
+                    return False
 
             # Short delay for download to start
             print(f"   ⏳ Attente téléchargement ({self.download_delay}s)...")
@@ -350,11 +363,15 @@ Appuyez sur Entrée quand c'est fait...
     def _get_selected_candidate_name_from_list(self) -> Optional[str]:
         """Get name of selected candidate from the sidebar list (faster)"""
         try:
-            selected = self.driver.find_element(
-                By.CSS_SELECTOR,
-                "li[data-testid='CandidateListItem'][data-selected='true'] button[data-testid='CandidateListItem-button']"
-            )
-            return selected.text.strip()
+            # Try aria-current first, then data-selected
+            name = self.driver.execute_script("""
+                let item = document.querySelector('li[data-testid="CandidateListItem"][aria-current="true"]');
+                if (!item) item = document.querySelector('li[data-testid="CandidateListItem"][data-selected="true"]');
+                if (!item) return null;
+                const btn = item.querySelector('button[data-testid="CandidateListItem-button"]');
+                return btn ? btn.textContent.trim() : null;
+            """)
+            return name
         except:
             return None
 
@@ -413,11 +430,18 @@ Appuyez sur Entrée quand c'est fait...
     def get_current_candidate_index(self):
         """Get index of currently selected candidate in the list"""
         try:
-            items = self.get_candidate_list_items()
-            for i, item in enumerate(items):
-                if item.get_attribute("data-selected") == "true":
-                    return i
-            return -1
+            # Direct JavaScript query - much faster than iterating in Python
+            # Check both aria-current="true" and data-selected="true"
+            index = self.driver.execute_script("""
+                const items = document.querySelectorAll('#hanselCandidateListContainer > div > ul > li[data-testid="CandidateListItem"]');
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].getAttribute('aria-current') === 'true' || items[i].getAttribute('data-selected') === 'true') {
+                        return i;
+                    }
+                }
+                return -1;
+            """)
+            return index
         except:
             return -1
 
@@ -440,20 +464,27 @@ Appuyez sur Entrée quand c'est fait...
             print(f"   ⚠️ Erreur 'Afficher plus': {e}")
             return False
 
-    def _get_candidate_names_from_list(self, items, start_index: int) -> list:
-        """Get names of candidates from list starting at index"""
-        names = []
-        for i in range(start_index, len(items)):
-            try:
-                button = items[i].find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
-                names.append((i, button.text.strip()))
-            except:
-                continue
-        return names
+    def _get_candidate_names_from_list_js(self, start_index: int) -> list:
+        """Get names of candidates from list starting at index - using fast JS"""
+        try:
+            names = self.driver.execute_script("""
+                const items = document.querySelectorAll('#hanselCandidateListContainer > div > ul > li[data-testid="CandidateListItem"]');
+                const result = [];
+                for (let i = arguments[0]; i < items.length; i++) {
+                    const btn = items[i].querySelector('button[data-testid="CandidateListItem-button"]');
+                    if (btn) {
+                        result.push([i, btn.textContent.trim()]);
+                    }
+                }
+                return result;
+            """, start_index)
+            return names or []
+        except:
+            return []
 
-    def _find_next_not_downloaded(self, items, start_index: int) -> int:
+    def _find_next_not_downloaded(self, start_index: int) -> int:
         """Find next candidate that hasn't been downloaded yet (smart skip)"""
-        candidates = self._get_candidate_names_from_list(items, start_index)
+        candidates = self._get_candidate_names_from_list_js(start_index)
         skipped_count = 0
 
         for idx, name in candidates:
@@ -494,58 +525,52 @@ Appuyez sur Entrée quand c'est fait...
                 print("🔄 Tentative de déblocage via la liste...")
                 return self._force_next_in_list()
 
-            items = self.get_candidate_list_items()
             current_index = self.get_current_candidate_index()
 
             if current_index == -1:
                 print("   ⚠️ Candidat actuel non trouvé dans la liste")
                 return False
 
-            print(f"   📋 Position actuelle: {current_index + 1}/{len(items)}")
-
             # Smart skip: find next candidate that hasn't been downloaded
-            next_index = self._find_next_not_downloaded(items, current_index + 1)
+            next_index = self._find_next_not_downloaded(current_index + 1)
 
             # If all remaining in current list are downloaded, try loading more
             while next_index == -1:
-                print(f"   📋 Tous les candidats visibles sont téléchargés, chargement de plus...")
+                print(f"   📋 Tous téléchargés, chargement de plus...")
                 if self.click_show_more():
                     time.sleep(1)
-                    items = self.get_candidate_list_items()
-                    # Search from where we were
-                    next_index = self._find_next_not_downloaded(items, current_index + 1)
+                    next_index = self._find_next_not_downloaded(current_index + 1)
                     if next_index == -1:
-                        # Still nothing new, continue loading
-                        old_len = len(items)
+                        # Still nothing new, try once more
                         if self.click_show_more():
                             time.sleep(1)
-                            items = self.get_candidate_list_items()
-                            if len(items) == old_len:
-                                print("   ⚠️ Plus de candidats à charger")
-                                return False
-                            next_index = self._find_next_not_downloaded(items, current_index + 1)
-                        else:
+                            next_index = self._find_next_not_downloaded(current_index + 1)
+                        if next_index == -1:
                             print("   ⚠️ Fin de la liste, tous téléchargés")
                             return False
                 else:
                     print("   ⚠️ Impossible de charger plus de candidats")
                     return False
 
-            # Click on next candidate
-            next_item = items[next_index]
-            button = next_item.find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
-            candidate_name = button.text.strip()
-            print(f"👆 Clic sur candidat #{next_index + 1}: {candidate_name}")
+            # Click on next candidate using JavaScript (faster)
+            click_result = self.driver.execute_script("""
+                const items = document.querySelectorAll('#hanselCandidateListContainer > div > ul > li[data-testid="CandidateListItem"]');
+                const item = items[arguments[0]];
+                if (!item) return null;
+                const btn = item.querySelector('button[data-testid="CandidateListItem-button"]');
+                if (!btn) return null;
+                item.scrollIntoView({block: 'center'});
+                btn.click();
+                return btn.textContent.trim();
+            """, next_index)
 
-            # Scroll the element into view before clicking
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_item)
-            time.sleep(0.3)
-
-            # Use JavaScript click to avoid interception issues
-            self.driver.execute_script("arguments[0].click();", button)
-            time.sleep(self.next_candidate_delay)
-            print("   ✅ Candidat chargé!")
-            return True
+            if click_result:
+                print(f"👆 Clic sur candidat #{next_index + 1}: {click_result}")
+                time.sleep(self.next_candidate_delay)
+                return True
+            else:
+                print("   ⚠️ Échec du clic sur le candidat")
+                return False
 
         except Exception as e:
             print(f"❌ Erreur navigation: {e}")
