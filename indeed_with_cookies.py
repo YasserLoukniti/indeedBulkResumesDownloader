@@ -448,18 +448,38 @@ Appuyez sur Entrée quand c'est fait...
     def click_show_more(self) -> bool:
         """Click 'Afficher plus' button to load more candidates"""
         try:
-            show_more_btn = self.driver.find_element(By.ID, "fetchNextCandidates")
-            if show_more_btn:
+            # Use JavaScript to find and click - more reliable
+            clicked = self.driver.execute_script("""
+                // Try by ID first
+                let btn = document.getElementById('fetchNextCandidates');
+                // Fallback: try by data-testid
+                if (!btn) btn = document.querySelector('[data-testid="fetchNextCandidates"]');
+                // Fallback: try by text content
+                if (!btn) {
+                    const buttons = document.querySelectorAll('button');
+                    for (const b of buttons) {
+                        if (b.textContent.includes('Afficher plus') || b.textContent.includes('Show more')) {
+                            btn = b;
+                            break;
+                        }
+                    }
+                }
+                if (btn) {
+                    btn.scrollIntoView({block: 'center'});
+                    btn.click();
+                    return true;
+                }
+                return false;
+            """)
+
+            if clicked:
                 print("   📜 Clic sur 'Afficher plus'...")
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", show_more_btn)
-                time.sleep(0.3)
-                self.driver.execute_script("arguments[0].click();", show_more_btn)
                 time.sleep(2)  # Wait for new candidates to load
                 print("   ✅ Plus de candidats chargés!")
                 return True
-        except NoSuchElementException:
-            print("   ℹ️ Bouton 'Afficher plus' non trouvé")
-            return False
+            else:
+                print("   ℹ️ Bouton 'Afficher plus' non trouvé (fin de liste)")
+                return False
         except Exception as e:
             print(f"   ⚠️ Erreur 'Afficher plus': {e}")
             return False
@@ -534,22 +554,16 @@ Appuyez sur Entrée quand c'est fait...
             # Smart skip: find next candidate that hasn't been downloaded
             next_index = self._find_next_not_downloaded(current_index + 1)
 
-            # If all remaining in current list are downloaded, try loading more
+            # If all remaining in current list are downloaded, keep loading more
             while next_index == -1:
                 print(f"   📋 Tous téléchargés, chargement de plus...")
                 if self.click_show_more():
-                    time.sleep(1)
+                    time.sleep(1.5)
+                    # Search only in the NEW candidates (after current list length)
                     next_index = self._find_next_not_downloaded(current_index + 1)
-                    if next_index == -1:
-                        # Still nothing new, try once more
-                        if self.click_show_more():
-                            time.sleep(1)
-                            next_index = self._find_next_not_downloaded(current_index + 1)
-                        if next_index == -1:
-                            print("   ⚠️ Fin de la liste, tous téléchargés")
-                            return False
                 else:
-                    print("   ⚠️ Impossible de charger plus de candidats")
+                    # No more "Afficher plus" button = truly end of list
+                    print("   ⚠️ Fin de la liste, tous téléchargés")
                     return False
 
             # Click on next candidate using JavaScript (faster)
