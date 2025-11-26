@@ -78,6 +78,9 @@ class IndeedCVDownloaderWithCookies:
         self.stuck_count = 0
         self.max_stuck_attempts = 3
 
+        # Time tracking
+        self.start_time = None
+
         print("""
 ╔════════════════════════════════════════════════════════════╗
 ║   Indeed CV Downloader - Cookie Session Method            ║
@@ -609,6 +612,9 @@ Appuyez sur Entrée quand c'est fait...
                 print("⚠️ Aucun candidat sélectionné! Veuillez en sélectionner un.")
                 input("Appuyez sur Entrée quand c'est fait...")
 
+            # Start timer
+            self.start_time = time.time()
+
             # Get total
             total = self._get_total_candidates()
             if total:
@@ -675,6 +681,19 @@ Appuyez sur Entrée quand c'est fait...
         if self.stats['total_processed'] > 0:
             rate = (self.stats['successful_downloads'] / self.stats['total_processed'] * 100)
             print(f"Taux:       {rate:.2f}%")
+
+        # Time statistics
+        if self.start_time:
+            elapsed = time.time() - self.start_time
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = int(elapsed % 60)
+
+            print(f"\n⏱️ Temps total: {hours}h {minutes}m {seconds}s")
+
+            if self.stats['successful_downloads'] > 0:
+                avg_time = elapsed / self.stats['successful_downloads']
+                print(f"⏱️ Moyenne/CV:  {avg_time:.1f}s")
 
         print("=" * 60)
 
