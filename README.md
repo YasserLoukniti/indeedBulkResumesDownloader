@@ -14,12 +14,27 @@ Automated Python script to bulk download resumes from Indeed Employer platform.
 
 ## Prerequisites
 
-- Python 3.8+
 - Google Chrome browser
 - Indeed Employer account with access to candidates
 - Active Indeed Employer session
 
-## Installation
+## Standalone Executables (No Python Required)
+
+Pre-built executables are available in the `dist/` folder:
+
+| File | Description |
+|------|-------------|
+| `IndeedCVDownloader.exe` | Main downloader application |
+| `ConvertCookies.exe` | Cookie format converter |
+
+### Quick Start (Executable)
+
+1. Export your cookies from Chrome (see "Export your Indeed cookies" below)
+2. Save the file as `logs/indeed_cookies.txt`
+3. Run `ConvertCookies.exe` to convert to JSON format
+4. Run `IndeedCVDownloader.exe` to start downloading
+
+## Installation (Python)
 
 ### 1. Clone the repository
 
@@ -52,11 +67,14 @@ pip install -r requirements.txt
 
 ### 4. Convert cookies to JSON
 
+1. Save your exported cookies as `logs/indeed_cookies.txt`
+2. Run the converter:
+
 ```bash
 python convert_cookies.py
 ```
 
-This will create `logs/indeed_cookies.json` automatically.
+This will read `logs/indeed_cookies.txt` and create `logs/indeed_cookies.json`.
 
 ## Configuration
 
@@ -157,8 +175,11 @@ del logs\checkpoint.json
 
 ```
 indeed-cv-downloader/
-├── indeed_with_cookies.py      # Main script
-├── convert_cookies.py          # Cookie converter utility
+├── dist/                       # Standalone executables
+│   ├── IndeedCVDownloader.exe  # Main application (no Python needed)
+│   └── ConvertCookies.exe      # Cookie converter (no Python needed)
+├── indeed_with_cookies.py      # Main script (Python version)
+├── convert_cookies.py          # Cookie converter utility (Python version)
 ├── requirements.txt            # Python dependencies
 ├── .env.config                 # Configuration file
 ├── .gitignore                  # Git ignore rules
@@ -166,7 +187,8 @@ indeed-cv-downloader/
 │   └── Candidate_Name_YYYYMMDD_HHMMSS.pdf
 └── logs/                       # Logs and checkpoints
     ├── checkpoint.json         # Resume state
-    ├── indeed_cookies.json     # Session cookies
+    ├── indeed_cookies.txt      # Exported cookies (Netscape format)
+    ├── indeed_cookies.json     # Converted cookies (JSON format)
     └── scraper_*.log          # Execution logs
 ```
 

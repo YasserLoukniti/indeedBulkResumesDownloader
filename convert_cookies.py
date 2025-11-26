@@ -51,9 +51,38 @@ def convert_netscape_to_json(txt_file, json_file):
     print(f"📁 Fichier créé: {json_file}")
 
 if __name__ == "__main__":
-    txt_file = r"C:\Users\yass_\Downloads\employers.indeed.com_cookies.txt"
-    json_file = r"C:\Users\yass_\Desktop\indeed-cv-downloader\logs\indeed_cookies.json"
+    import os
+    import sys
+
+    # Get the directory where the exe/script is located
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Fixed paths in logs folder
+    logs_dir = os.path.join(base_dir, "logs")
+    txt_file = os.path.join(logs_dir, "indeed_cookies.txt")
+    json_file = os.path.join(logs_dir, "indeed_cookies.json")
+
+    # Create logs directory if needed
+    os.makedirs(logs_dir, exist_ok=True)
+
+    print("=" * 50)
+    print("  Convertisseur Cookies Netscape -> JSON")
+    print("=" * 50)
+    print(f"\nInput:  {txt_file}")
+    print(f"Output: {json_file}")
+
+    # Check if input exists
+    if not os.path.exists(txt_file):
+        print(f"\n❌ Fichier introuvable: {txt_file}")
+        print("\n📋 Placez votre fichier cookies.txt dans le dossier 'logs'")
+        print("   et renommez-le en 'indeed_cookies.txt'")
+        input("\nAppuyez sur Entrée pour quitter...")
+        sys.exit(1)
 
     convert_netscape_to_json(txt_file, json_file)
     print("\n✅ Conversion terminée!")
-    print("Vous pouvez maintenant lancer: python indeed_with_cookies.py")
+    print("Vous pouvez maintenant lancer IndeedCVDownloader.exe")
+    input("\nAppuyez sur Entrée pour quitter...")
