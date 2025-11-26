@@ -275,8 +275,10 @@ Appuyez sur Entrée quand c'est fait...
         """Download CV for current candidate - optimized for speed"""
         try:
             # Get candidate name from the list (faster than waiting for full page load)
+            print("   🔍 Récupération du nom depuis la liste...")
             candidate_name = self._get_selected_candidate_name_from_list()
             if not candidate_name:
+                print("   🔍 Nom non trouvé dans liste, attente du chargement page...")
                 candidate_name = self.get_current_candidate_name()
 
             if not candidate_name:
@@ -289,24 +291,40 @@ Appuyez sur Entrée quand c'est fait...
                 self.stats['skipped'] += 1
                 return True
 
-            print(f"📥 Téléchargement: {candidate_name}")
+            print(f"📥 Candidat: {candidate_name}")
 
-            # Find download link as soon as it appears (short timeout for speed)
+            # Find download link - check PRESENCE (not clickable, we'll use JS click)
+            # Button text: "Download resume" (English) or "Télécharger le CV" (French)
+            print("   🔍 Recherche du bouton CV...")
+            download_link = None
+
+            # Quick check for both versions using XPath OR condition
             try:
                 download_link = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Télécharger"))
+                    EC.presence_of_element_located((
+                        By.XPATH,
+                        "//a[text()='Download resume' or text()='Télécharger le CV']"
+                    ))
                 )
-                # Click immediately via JavaScript (faster)
-                self.driver.execute_script("arguments[0].click();", download_link)
+                print(f"   ✅ Bouton trouvé: '{download_link.text}'")
             except TimeoutException:
-                print(f"⚠️ Pas de lien téléchargement pour: {candidate_name}")
+                print(f"   ⚠️ Aucun bouton CV trouvé après 5s")
                 self.stats['failed_downloads'] += 1
                 return False
 
+            # Scroll into view and click
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", download_link)
+            time.sleep(0.2)
+            print("   🖱️ Clic sur le bouton...")
+            self.driver.execute_script("arguments[0].click();", download_link)
+            print("   ✅ Clic effectué!")
+
             # Short delay for download to start
+            print(f"   ⏳ Attente téléchargement ({self.download_delay}s)...")
             time.sleep(self.download_delay)
 
             # Verify and rename
+            print("   🔍 Vérification du téléchargement...")
             if self._verify_download():
                 self._rename_latest_file(candidate_name)
 
@@ -318,12 +336,12 @@ Appuyez sur Entrée quand c'est fait...
                 return True
             else:
                 self.stats['failed_downloads'] += 1
-                print(f"⚠️ Échec vérification: {candidate_name}")
+                print(f"⚠️ Échec vérification téléchargement: {candidate_name}")
                 return False
 
         except Exception as e:
             self.stats['failed_downloads'] += 1
-            print(f"❌ Erreur: {str(e)}")
+            print(f"❌ Erreur téléchargement: {str(e)}")
             return False
 
     def _get_selected_candidate_name_from_list(self) -> Optional[str]:
@@ -405,16 +423,48 @@ Appuyez sur Entrée quand c'est fait...
         try:
             show_more_btn = self.driver.find_element(By.ID, "fetchNextCandidates")
             if show_more_btn:
-                print("📜 Clic sur 'Afficher plus'...")
-                show_more_btn.click()
+                print("   📜 Clic sur 'Afficher plus'...")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", show_more_btn)
+                time.sleep(0.3)
+                self.driver.execute_script("arguments[0].click();", show_more_btn)
                 time.sleep(2)  # Wait for new candidates to load
-                print("✅ Plus de candidats chargés!")
+                print("   ✅ Plus de candidats chargés!")
                 return True
         except NoSuchElementException:
+            print("   ℹ️ Bouton 'Afficher plus' non trouvé")
             return False
         except Exception as e:
-            print(f"⚠️ Erreur 'Afficher plus': {e}")
+            print(f"   ⚠️ Erreur 'Afficher plus': {e}")
             return False
+
+    def _get_candidate_names_from_list(self, items, start_index: int) -> list:
+        """Get names of candidates from list starting at index"""
+        names = []
+        for i in range(start_index, len(items)):
+            try:
+                button = items[i].find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
+                names.append((i, button.text.strip()))
+            except:
+                continue
+        return names
+
+    def _find_next_not_downloaded(self, items, start_index: int) -> int:
+        """Find next candidate that hasn't been downloaded yet (smart skip)"""
+        candidates = self._get_candidate_names_from_list(items, start_index)
+        skipped_count = 0
+
+        for idx, name in candidates:
+            if name not in self.checkpoint_data['downloaded_names']:
+                if skipped_count > 0:
+                    print(f"   ⏭️ Skip intelligent: {skipped_count} candidats déjà téléchargés")
+                return idx
+            skipped_count += 1
+            self.stats['skipped'] += 1
+
+        # All remaining are downloaded
+        if skipped_count > 0:
+            print(f"   ⏭️ Skip intelligent: {skipped_count} candidats déjà téléchargés (fin de liste)")
+        return -1  # All downloaded
 
     def _check_if_stuck(self) -> bool:
         """Check if we're stuck on the same position"""
@@ -439,30 +489,43 @@ Appuyez sur Entrée quand c'est fait...
             # Check if stuck on same position
             if self._check_if_stuck():
                 print("🔄 Tentative de déblocage via la liste...")
-                # Force move to next in list
                 return self._force_next_in_list()
 
             items = self.get_candidate_list_items()
             current_index = self.get_current_candidate_index()
 
             if current_index == -1:
-                print("⚠️ Candidat actuel non trouvé dans la liste")
+                print("   ⚠️ Candidat actuel non trouvé dans la liste")
                 return False
 
-            next_index = current_index + 1
+            print(f"   📋 Position actuelle: {current_index + 1}/{len(items)}")
 
-            # Check if we need to load more candidates
-            if next_index >= len(items):
-                print(f"📋 Fin de la liste visible ({len(items)} candidats)")
+            # Smart skip: find next candidate that hasn't been downloaded
+            next_index = self._find_next_not_downloaded(items, current_index + 1)
+
+            # If all remaining in current list are downloaded, try loading more
+            while next_index == -1:
+                print(f"   📋 Tous les candidats visibles sont téléchargés, chargement de plus...")
                 if self.click_show_more():
-                    # Refresh the list after loading more
                     time.sleep(1)
                     items = self.get_candidate_list_items()
-                    if next_index >= len(items):
-                        print("⚠️ Plus de candidats disponibles")
-                        return False
+                    # Search from where we were
+                    next_index = self._find_next_not_downloaded(items, current_index + 1)
+                    if next_index == -1:
+                        # Still nothing new, continue loading
+                        old_len = len(items)
+                        if self.click_show_more():
+                            time.sleep(1)
+                            items = self.get_candidate_list_items()
+                            if len(items) == old_len:
+                                print("   ⚠️ Plus de candidats à charger")
+                                return False
+                            next_index = self._find_next_not_downloaded(items, current_index + 1)
+                        else:
+                            print("   ⚠️ Fin de la liste, tous téléchargés")
+                            return False
                 else:
-                    print("⚠️ Impossible de charger plus de candidats")
+                    print("   ⚠️ Impossible de charger plus de candidats")
                     return False
 
             # Click on next candidate
@@ -473,12 +536,12 @@ Appuyez sur Entrée quand c'est fait...
 
             # Scroll the element into view before clicking
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_item)
-            time.sleep(0.3)  # Small delay after scroll
+            time.sleep(0.3)
 
             # Use JavaScript click to avoid interception issues
             self.driver.execute_script("arguments[0].click();", button)
             time.sleep(self.next_candidate_delay)
-            print("✅ Candidat suivant chargé!")
+            print("   ✅ Candidat chargé!")
             return True
 
         except Exception as e:
@@ -534,36 +597,17 @@ Appuyez sur Entrée quand c'est fait...
                 print("❌ Échec du chargement de la session. Vérifiez vos cookies.")
                 return
 
-            # Step 5: Navigate to candidates list (WITHOUT opening any candidate)
-            print("\n🔍 Navigation vers les candidatures...")
-            # Force to stay on list view without opening a candidate
-            self.driver.get("https://employers.indeed.com/candidates?statusName=All&id=0")
-            print(f"⏳ Attente du chargement de la liste ({self.page_load_delay} secondes)...")
-            time.sleep(self.page_load_delay)
-
-            # Step 6: Wait for user to click on first candidate
+            # Step 5: Wait for user to select first candidate
             print("\n" + "="*60)
-            print("👆 CLIQUEZ SUR LE PREMIER CANDIDAT dans la liste à gauche")
-            print("   (Pas encore appuyez sur Entrée!)")
+            print("👆 CLIQUEZ SUR LE PREMIER CANDIDAT à télécharger")
+            print("   puis appuyez sur Entrée pour démarrer")
             print("="*60)
-
-            # Wait until URL changes (user clicked on a candidate)
-            print("\n⏳ En attente de votre clic...")
-            original_url = self.driver.current_url
-
-            while True:
-                time.sleep(1)
-                current_url = self.driver.current_url
-
-                # Check if user clicked on a candidate (URL changed and has real id)
-                if current_url != original_url and "/view?" in current_url and "id=" in current_url and "id=0" not in current_url:
-                    print(f"\n✅ Candidat détecté! URL: {current_url}")
-                    print("⏳ Attente du chargement des boutons (3 secondes)...")
-                    time.sleep(3)  # Wait for buttons to load
-                    break
-
-            print("\n👍 Parfait! Tout est chargé. Appuyez sur Entrée pour démarrer les téléchargements...")
             input()
+
+            # Verify a candidate is selected
+            if self.get_current_candidate_index() == -1:
+                print("⚠️ Aucun candidat sélectionné! Veuillez en sélectionner un.")
+                input("Appuyez sur Entrée quand c'est fait...")
 
             # Get total
             total = self._get_total_candidates()
