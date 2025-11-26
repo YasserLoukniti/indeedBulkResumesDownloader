@@ -73,6 +73,11 @@ class IndeedCVDownloaderWithCookies:
         self.driver = None
         self.wait = None
 
+        # Stuck detection
+        self.last_position = None
+        self.stuck_count = 0
+        self.max_stuck_attempts = 3
+
         print("""
 ╔════════════════════════════════════════════════════════════╗
 ║   Indeed CV Downloader - Cookie Session Method            ║
@@ -267,9 +272,12 @@ Appuyez sur Entrée quand c'est fait...
             return None
 
     def download_cv(self) -> bool:
-        """Download CV for current candidate"""
+        """Download CV for current candidate - optimized for speed"""
         try:
-            candidate_name = self.get_current_candidate_name()
+            # Get candidate name from the list (faster than waiting for full page load)
+            candidate_name = self._get_selected_candidate_name_from_list()
+            if not candidate_name:
+                candidate_name = self.get_current_candidate_name()
 
             if not candidate_name:
                 print("❌ Impossible d'identifier le candidat")
@@ -283,15 +291,19 @@ Appuyez sur Entrée quand c'est fait...
 
             print(f"📥 Téléchargement: {candidate_name}")
 
-            # Find download link
-            download_link = self.wait.until(
-                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Télécharger"))
-            )
+            # Find download link as soon as it appears (short timeout for speed)
+            try:
+                download_link = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Télécharger"))
+                )
+                # Click immediately via JavaScript (faster)
+                self.driver.execute_script("arguments[0].click();", download_link)
+            except TimeoutException:
+                print(f"⚠️ Pas de lien téléchargement pour: {candidate_name}")
+                self.stats['failed_downloads'] += 1
+                return False
 
-            # Click to download
-            download_link.click()
-
-            # Wait for download
+            # Short delay for download to start
             time.sleep(self.download_delay)
 
             # Verify and rename
@@ -313,6 +325,17 @@ Appuyez sur Entrée quand c'est fait...
             self.stats['failed_downloads'] += 1
             print(f"❌ Erreur: {str(e)}")
             return False
+
+    def _get_selected_candidate_name_from_list(self) -> Optional[str]:
+        """Get name of selected candidate from the sidebar list (faster)"""
+        try:
+            selected = self.driver.find_element(
+                By.CSS_SELECTOR,
+                "li[data-testid='CandidateListItem'][data-selected='true'] button[data-testid='CandidateListItem-button']"
+            )
+            return selected.text.strip()
+        except:
+            return None
 
     def _verify_download(self, timeout: int = None) -> bool:
         """Verify download completed"""
@@ -393,9 +416,32 @@ Appuyez sur Entrée quand c'est fait...
             print(f"⚠️ Erreur 'Afficher plus': {e}")
             return False
 
+    def _check_if_stuck(self) -> bool:
+        """Check if we're stuck on the same position"""
+        current_pos = self._get_current_position()
+        if current_pos is None:
+            return False
+
+        if self.last_position == current_pos:
+            self.stuck_count += 1
+            if self.stuck_count >= self.max_stuck_attempts:
+                print(f"⚠️ Bloqué sur position {current_pos} après {self.stuck_count} tentatives")
+                return True
+        else:
+            self.stuck_count = 0
+            self.last_position = current_pos
+
+        return False
+
     def go_to_next_candidate(self) -> bool:
         """Navigate to next candidate by clicking in the list"""
         try:
+            # Check if stuck on same position
+            if self._check_if_stuck():
+                print("🔄 Tentative de déblocage via la liste...")
+                # Force move to next in list
+                return self._force_next_in_list()
+
             items = self.get_candidate_list_items()
             current_index = self.get_current_candidate_index()
 
@@ -437,6 +483,38 @@ Appuyez sur Entrée quand c'est fait...
 
         except Exception as e:
             print(f"❌ Erreur navigation: {e}")
+            return False
+
+    def _force_next_in_list(self) -> bool:
+        """Force click on next candidate in list when stuck"""
+        try:
+            items = self.get_candidate_list_items()
+            current_index = self.get_current_candidate_index()
+
+            if current_index == -1 or current_index + 1 >= len(items):
+                # Try to load more
+                if self.click_show_more():
+                    time.sleep(1)
+                    items = self.get_candidate_list_items()
+                    current_index = self.get_current_candidate_index()
+
+            next_index = current_index + 1
+            if next_index < len(items):
+                next_item = items[next_index]
+                button = next_item.find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_item)
+                time.sleep(0.3)
+                self.driver.execute_script("arguments[0].click();", button)
+                time.sleep(self.next_candidate_delay)
+                # Reset stuck counter after successful force
+                self.stuck_count = 0
+                self.last_position = None
+                print("✅ Déblocage réussi!")
+                return True
+
+            return False
+        except Exception as e:
+            print(f"❌ Échec déblocage: {e}")
             return False
 
     def run(self):
