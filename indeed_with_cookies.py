@@ -356,25 +356,81 @@ Appuyez sur Entrée quand c'est fait...
             pass
         return None
 
-    def go_to_next_candidate(self) -> bool:
-        """Navigate to next candidate"""
+    def get_candidate_list_items(self):
+        """Get all candidate list items"""
         try:
-            print("🔍 Recherche du bouton 'Candidature suivante'...")
-            # Use the specific ID for the next button
-            next_button = self.driver.find_element(By.ID, "nextPreBlock-next")
+            container = self.driver.find_element(By.CSS_SELECTOR, "#hanselCandidateListContainer > div > ul")
+            items = container.find_elements(By.CSS_SELECTOR, "li[data-testid='CandidateListItem']")
+            return items
+        except Exception as e:
+            print(f"⚠️ Erreur récupération liste: {e}")
+            return []
 
-            if not next_button.is_enabled():
-                print("⚠️ Bouton 'Candidature suivante' désactivé (dernier candidat?)")
+    def get_current_candidate_index(self):
+        """Get index of currently selected candidate in the list"""
+        try:
+            items = self.get_candidate_list_items()
+            for i, item in enumerate(items):
+                if item.get_attribute("data-selected") == "true":
+                    return i
+            return -1
+        except:
+            return -1
+
+    def click_show_more(self) -> bool:
+        """Click 'Afficher plus' button to load more candidates"""
+        try:
+            show_more_btn = self.driver.find_element(By.ID, "fetchNextCandidates")
+            if show_more_btn:
+                print("📜 Clic sur 'Afficher plus'...")
+                show_more_btn.click()
+                time.sleep(2)  # Wait for new candidates to load
+                print("✅ Plus de candidats chargés!")
+                return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            print(f"⚠️ Erreur 'Afficher plus': {e}")
+            return False
+
+    def go_to_next_candidate(self) -> bool:
+        """Navigate to next candidate by clicking in the list"""
+        try:
+            items = self.get_candidate_list_items()
+            current_index = self.get_current_candidate_index()
+
+            if current_index == -1:
+                print("⚠️ Candidat actuel non trouvé dans la liste")
                 return False
 
-            print("✅ Clic sur 'Candidature suivante'")
-            next_button.click()
+            next_index = current_index + 1
+
+            # Check if we need to load more candidates
+            if next_index >= len(items):
+                print(f"📋 Fin de la liste visible ({len(items)} candidats)")
+                if self.click_show_more():
+                    # Refresh the list after loading more
+                    time.sleep(1)
+                    items = self.get_candidate_list_items()
+                    if next_index >= len(items):
+                        print("⚠️ Plus de candidats disponibles")
+                        return False
+                else:
+                    print("⚠️ Impossible de charger plus de candidats")
+                    return False
+
+            # Click on next candidate
+            next_item = items[next_index]
+            button = next_item.find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
+            candidate_name = button.text.strip()
+            print(f"👆 Clic sur candidat #{next_index + 1}: {candidate_name}")
+            button.click()
             time.sleep(self.next_candidate_delay)
             print("✅ Candidat suivant chargé!")
             return True
 
         except Exception as e:
-            print(f"❌ Impossible de trouver le bouton 'Candidature suivante': {e}")
+            print(f"❌ Erreur navigation: {e}")
             return False
 
     def run(self):
