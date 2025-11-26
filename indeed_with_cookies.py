@@ -202,7 +202,7 @@ Appuyez sur Entrée quand c'est fait...
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         self.driver.maximize_window()
-        self.wait = WebDriverWait(self.driver, self.config['page_load_timeout'])
+        self.wait = WebDriverWait(self.driver, self.config.get('page_load_timeout', 30))
 
         print("✅ Chrome driver initialized")
 
