@@ -424,7 +424,13 @@ Appuyez sur Entrée quand c'est fait...
             button = next_item.find_element(By.CSS_SELECTOR, "button[data-testid='CandidateListItem-button']")
             candidate_name = button.text.strip()
             print(f"👆 Clic sur candidat #{next_index + 1}: {candidate_name}")
-            button.click()
+
+            # Scroll the element into view before clicking
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_item)
+            time.sleep(0.3)  # Small delay after scroll
+
+            # Use JavaScript click to avoid interception issues
+            self.driver.execute_script("arguments[0].click();", button)
             time.sleep(self.next_candidate_delay)
             print("✅ Candidat suivant chargé!")
             return True
