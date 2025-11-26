@@ -1,15 +1,17 @@
 # Indeed CV Downloader
 
-Automated Python script to bulk download resumes from Indeed Employer platform.
+Automated tool to bulk download resumes from Indeed Employer platform.
 
 ## Features
 
 - Automatic bulk CV/resume download
 - Session-based authentication (no credentials needed)
 - Smart resume on interruption with checkpoint system
-- Progress tracking with real-time statistics
+- **Smart skip**: Automatically skips already downloaded candidates in batch
+- Progress tracking with real-time statistics and time tracking
 - Configurable delays and parameters
 - Automatic file naming with candidate names
+- Bilingual support (English "Download resume" / French "Télécharger le CV")
 - Error handling and retry logic
 
 ## Prerequisites
@@ -32,7 +34,9 @@ Pre-built executables are available in the `dist/` folder:
 1. Export your cookies from Chrome (see "Export your Indeed cookies" below)
 2. Save the file as `logs/indeed_cookies.txt`
 3. Run `ConvertCookies.exe` to convert to JSON format
-4. Run `IndeedCVDownloader.exe` to start downloading
+4. Open Indeed Employer in Chrome and navigate to your candidates list
+5. Run `IndeedCVDownloader.exe`
+6. Click on the first candidate you want to download, then press Enter
 
 ## Installation (Python)
 
@@ -138,25 +142,28 @@ python indeed_with_cookies.py
 
 ### 3. Follow the prompts
 
-1. Script opens Chrome with your saved session
-2. Navigates to candidates page
-3. **Click on the first candidate** in the sidebar when prompted
+1. Open Indeed Employer in Chrome and go to your candidates list
+2. Run the script - it opens Chrome with your saved cookies
+3. **Click on the first candidate** you want to download
 4. Press Enter to start automatic download
-5. Script downloads CVs and navigates automatically
+5. Script downloads CVs and navigates automatically through the list
 
 ### 4. Monitor progress
 
 ```
-CVs: 10it [01:23, 8.34s/it]
+CVs: 150it [25:30, 10.20s/it]
 
 ============================================================
-STATISTICS
+📊 STATISTIQUES
 ============================================================
-Total:      10
-✅ Success:  10
-❌ Failed:   0
-⏭️  Skipped: 0
-Rate:       100.00%
+Total:      150
+✅ Réussis:  145
+❌ Échecs:   3
+⏭️ Ignorés:  2
+Taux:       96.67%
+
+⏱️ Temps total: 0h 25m 30s
+⏱️ Moyenne/CV:  10.6s
 ============================================================
 ```
 
