@@ -22,10 +22,10 @@ Automated Python script to bulk download resumes from Indeed Employer platform.
 
 Pre-built executables are available in the `dist/` folder:
 
-| File | Description |
-|------|-------------|
+| File                     | Description                 |
+| ------------------------ | --------------------------- |
 | `IndeedCVDownloader.exe` | Main downloader application |
-| `ConvertCookies.exe` | Cookie format converter |
+| `ConvertCookies.exe`     | Cookie format converter     |
 
 ### Quick Start (Executable)
 
@@ -39,7 +39,7 @@ Pre-built executables are available in the `dist/` folder:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/indeed-cv-downloader.git
+git clone https://github.com/YasserLoukniti/indeed-cv-downloader.git
 cd indeed-cv-downloader
 ```
 
@@ -101,6 +101,7 @@ LOG_FOLDER=logs                 # Logs and checkpoints directory
 ### Performance Presets
 
 **Ultra-Fast** (~2s per CV, ~1h40 for 3000 CVs)
+
 ```
 DOWNLOAD_DELAY=0.5
 NEXT_CANDIDATE_DELAY=1.0
@@ -108,6 +109,7 @@ BETWEEN_CANDIDATES_DELAY=0.5
 ```
 
 **Stable** (~4s per CV, ~3h20 for 3000 CVs) - Recommended
+
 ```
 DOWNLOAD_DELAY=1.0
 NEXT_CANDIDATE_DELAY=1.5
@@ -115,6 +117,7 @@ BETWEEN_CANDIDATES_DELAY=1.0
 ```
 
 **Safe** (~8s per CV, ~6h40 for 3000 CVs)
+
 ```
 DOWNLOAD_DELAY=2.0
 NEXT_CANDIDATE_DELAY=3.0
@@ -243,6 +246,7 @@ Pull requests welcome. For major changes, open an issue first.
 ## Support
 
 For issues or questions, open a GitHub issue with:
+
 - Error message from logs
 - Configuration used
 - Steps to reproduce
