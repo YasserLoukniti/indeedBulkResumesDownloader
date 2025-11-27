@@ -55,6 +55,7 @@ class IndeedDownloader:
         self.current_job_id = None
         self.current_job_name = None
         self.current_job_folder = None
+        self.current_job_is_existing = False  # True if job folder already existed
 
         # Checkpoint
         self.checkpoint_file = Path(self.log_folder) / 'checkpoint_unified.json'
@@ -296,6 +297,10 @@ class IndeedDownloader:
             folder_name = safe_name
 
         job_folder = Path(self.download_folder) / folder_name
+
+        # Check if folder already exists (has PDFs)
+        self.current_job_is_existing = job_folder.exists() and any(job_folder.glob('*.pdf'))
+
         job_folder.mkdir(exist_ok=True)
 
         self.current_job_folder = job_folder
@@ -482,9 +487,76 @@ class IndeedDownloader:
 
         self._download_all_candidates_api()
 
+    def _load_job_checkpoint(self, scan_pdfs: bool = False) -> tuple:
+        """Load checkpoint for current job folder - returns (downloaded_ids, downloaded_names)
+
+        Args:
+            scan_pdfs: If True, scan existing PDF files for names (for existing jobs with new candidates)
+        """
+        downloaded_ids = set(self.checkpoint_data.get('downloaded_ids', []))
+        downloaded_names = set(self.checkpoint_data.get('downloaded_names', []))
+
+        if not self.current_job_folder:
+            return downloaded_ids, downloaded_names
+
+        # Load from job-specific checkpoint if exists
+        job_checkpoint_file = self.current_job_folder / 'checkpoint.json'
+        if job_checkpoint_file.exists():
+            try:
+                with open(job_checkpoint_file, 'r', encoding='utf-8') as f:
+                    job_data = json.load(f)
+                    downloaded_ids.update(job_data.get('downloaded_ids', []))
+                    downloaded_names.update(job_data.get('downloaded_names', []))
+            except:
+                pass
+
+        # Scan existing PDF files to get names (only for existing jobs with new candidates)
+        if scan_pdfs:
+            print("   Scan des CVs existants...")
+            for pdf_file in self.current_job_folder.glob('*.pdf'):
+                # Format: "Jean Dupont_20251126_154317.pdf"
+                name_part = pdf_file.stem.rsplit('_', 2)[0]  # Get "Jean Dupont"
+                if name_part:
+                    downloaded_names.add(name_part.lower())
+            print(f"   {len(downloaded_names)} noms trouves dans les fichiers existants")
+
+        return downloaded_ids, downloaded_names
+
+    def _save_job_checkpoint(self, legacy_id: str, name: str = None):
+        """Save checkpoint for current job folder"""
+        if not self.current_job_folder:
+            return
+
+        job_checkpoint_file = self.current_job_folder / 'checkpoint.json'
+
+        # Load existing
+        job_data = {'downloaded_ids': [], 'downloaded_names': []}
+        if job_checkpoint_file.exists():
+            try:
+                with open(job_checkpoint_file, 'r', encoding='utf-8') as f:
+                    job_data = json.load(f)
+                    if 'downloaded_names' not in job_data:
+                        job_data['downloaded_names'] = []
+            except:
+                pass
+
+        # Add new id
+        if legacy_id and legacy_id not in job_data['downloaded_ids']:
+            job_data['downloaded_ids'].append(legacy_id)
+
+        # Add new name
+        if name:
+            clean_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip().lower()
+            if clean_name and clean_name not in job_data['downloaded_names']:
+                job_data['downloaded_names'].append(clean_name)
+
+        # Save
+        with open(job_checkpoint_file, 'w', encoding='utf-8') as f:
+            json.dump(job_data, f, ensure_ascii=False, indent=2)
+
     def _download_all_candidates_api(self):
         """Download all candidates via API"""
-        print("\n🔍 Récupération des candidats via API...")
+        print("\nRecuperation des candidats via API...")
 
         all_candidates = []
         offset = 0
@@ -494,7 +566,7 @@ class IndeedDownloader:
             matches, total = self.fetch_candidates_api(offset=offset, limit=100)
 
             if offset == 0:
-                print(f"   📊 Total: {total} candidats")
+                print(f"   Total: {total} candidats")
 
             if not matches:
                 break
@@ -522,20 +594,37 @@ class IndeedDownloader:
             offset += 100
             time.sleep(0.5)
 
-        # Filter already downloaded
-        to_download = [c for c in all_candidates if c['legacy_id'] not in self.checkpoint_data['downloaded_ids']]
+        # Load all downloaded IDs and names
+        # Scan PDFs only for existing jobs (to detect already downloaded CVs)
+        downloaded_ids, downloaded_names = self._load_job_checkpoint(scan_pdfs=self.current_job_is_existing)
 
-        print(f"\n📊 À télécharger: {len(to_download)} / {len(all_candidates)}")
+        # Filter already downloaded (by ID or by name)
+        to_download = []
+        for c in all_candidates:
+            # Check by legacy_id
+            if c['legacy_id'] in downloaded_ids:
+                continue
+            # Check by name (cleaned and lowercased) - only if we have names from scan
+            if downloaded_names:
+                clean_name = "".join(ch for ch in c['name'] if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
+                if clean_name in downloaded_names:
+                    continue
+            to_download.append(c)
+
+        already_done = len(all_candidates) - len(to_download)
+        print(f"\n   Total: {len(all_candidates)} | Deja telecharges: {already_done} | A telecharger: {len(to_download)}")
 
         if not to_download:
-            print("✅ Tous les CVs sont déjà téléchargés!")
+            print("   Tous les CVs sont deja telecharges!")
             return
 
-        print(f"\n🚀 Téléchargement...\n")
+        print(f"\n   Telechargement...\n")
 
-        with tqdm(total=len(to_download), desc="CVs") as pbar:
+        with tqdm(total=len(to_download), desc="   CVs") as pbar:
             for candidate in to_download:
-                self.download_cv_api(candidate)
+                if self.download_cv_api(candidate):
+                    # Save to job-specific checkpoint (ID + name)
+                    self._save_job_checkpoint(candidate['legacy_id'], candidate['name'])
                 pbar.update(1)
 
     # ==================== FRONTEND MODE (Selenium) ====================
