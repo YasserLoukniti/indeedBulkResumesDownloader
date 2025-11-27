@@ -1,6 +1,6 @@
 # Indeed CV Downloader
 
-**Version 2.3.0**
+**Version 2.3.1**
 
 Automated tool to bulk download resumes from Indeed Employer platform.
 
@@ -246,6 +246,17 @@ For issues or questions, open a GitHub issue with:
 ---
 
 ## Changelog
+
+### v2.3.1 (2025-11-27)
+
+**Bug Fixes:**
+- **Fixed duplicate folder matching**: Each folder now matches only one job (no more duplicates in the list)
+- **Date-based matching**: Jobs with the same name are now correctly distinguished by their publication date
+- **Improved accuracy**: If both job and folder have dates, they MUST match for the folder to be considered existing
+
+**Improvements:**
+- Matching priority: exact name+date > exact name (no date) > partial name+date > partial name (no date)
+- Display shows job date to help identify which job matches which folder
 
 ### v2.3.0 (2025-11-27)
 

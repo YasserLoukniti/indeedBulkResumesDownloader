@@ -1133,12 +1133,30 @@ class IndeedDownloader:
         return all_jobs
 
     def _find_existing_job_folders(self, jobs: list) -> dict:
-        """Find which jobs already have folders in downloads"""
+        """Find which jobs already have folders in downloads
+
+        Returns dict mapping job_id -> folder info, ensuring each folder is matched to only one job.
+        Matching priority:
+        1. Exact name + exact date (score 4) - must match
+        2. Exact name only (score 2) - only if folder has no date or job has no date
+        3. Partial name + exact date (score 3)
+        4. Partial name only (score 1) - only if folder has no date or job has no date
+
+        IMPORTANT: If both job and folder have dates, they MUST match for name matching.
+        """
         existing = {}
         download_path = Path(self.download_folder)
 
         if not download_path.exists():
             return existing
+
+        # Normalize function for comparison (removes accents for comparison only)
+        def normalize(s):
+            import unicodedata
+            s = unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII')
+            s = re.sub(r'[^a-z0-9\s]', '', s.lower())
+            s = re.sub(r'\s+', ' ', s).strip()
+            return s
 
         # Get all folders with their info
         folder_info = {}
@@ -1149,56 +1167,117 @@ class IndeedDownloader:
                 if match:
                     job_name = match.group(1)
                     date = match.group(2)
-                    clean_name = self._clean_job_title(job_name).lower()
+                    clean_name = self._clean_job_title(job_name)
                     folder_info[folder.name] = {
+                        'original_name': job_name,
                         'clean_name': clean_name,
+                        'normalized_name': normalize(clean_name),
                         'date': date,
-                        'cv_count': len(list(folder.glob('*.pdf')))
+                        'cv_count': len(list(folder.glob('*.pdf'))),
+                        'matched_job_id': None  # Track which job matched this folder
                     }
                 else:
-                    clean_name = self._clean_job_title(folder.name).lower()
+                    clean_name = self._clean_job_title(folder.name)
                     folder_info[folder.name] = {
+                        'original_name': folder.name,
                         'clean_name': clean_name,
+                        'normalized_name': normalize(clean_name),
                         'date': None,
-                        'cv_count': len(list(folder.glob('*.pdf')))
+                        'cv_count': len(list(folder.glob('*.pdf'))),
+                        'matched_job_id': None
                     }
 
-        # Normalize function for comparison
-        def normalize(s):
-            # Remove accents, extra spaces, and normalize
-            import unicodedata
-            s = unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII')
-            s = re.sub(r'[^a-z0-9\s]', '', s.lower())
-            s = re.sub(r'\s+', ' ', s).strip()
-            return s
-
-        # Match jobs with folders
+        # Match jobs with folders - each folder can only match ONE job
+        # First pass: match jobs that have exact name + date match (highest priority)
         for job in jobs:
-            job_clean = normalize(job.get('title_clean', self._clean_job_title(job['title'])))
+            job_clean = job.get('title_clean', self._clean_job_title(job['title']))
+            job_normalized = normalize(job_clean)
             job_date = job.get('date', '')
+            job_id = job['id']
+
+            # Only look for exact name + date matches in first pass
+            if not job_date:
+                continue
 
             for folder_name, info in folder_info.items():
-                folder_clean = normalize(info['clean_name'])
+                if info['matched_job_id'] is not None:
+                    continue
 
-                # Exact match
-                if job_clean == folder_clean:
-                    existing[job['id']] = {
+                folder_normalized = info['normalized_name']
+                folder_date = info['date']
+
+                # Exact name + exact date match
+                if job_normalized == folder_normalized and folder_date == job_date:
+                    folder_info[folder_name]['matched_job_id'] = job_id
+                    existing[job_id] = {
                         'title': job['title'],
+                        'title_clean': job_clean,
                         'folder': folder_name,
                         'cv_count': info['cv_count'],
-                        'total_candidates': job.get('total_candidates', 0)
+                        'total_candidates': job.get('total_candidates', 0),
+                        'date': job_date
                     }
                     break
-                # Partial match (job name contains folder name or vice versa)
-                elif len(job_clean) >= 8 and len(folder_clean) >= 8:
-                    if job_clean in folder_clean or folder_clean in job_clean:
-                        existing[job['id']] = {
-                            'title': job['title'],
-                            'folder': folder_name,
-                            'cv_count': info['cv_count'],
-                            'total_candidates': job.get('total_candidates', 0)
-                        }
-                        break
+
+        # Second pass: for jobs without date match, try name-only match (only for folders without date)
+        for job in jobs:
+            job_id = job['id']
+            if job_id in existing:
+                continue  # Already matched
+
+            job_clean = job.get('title_clean', self._clean_job_title(job['title']))
+            job_normalized = normalize(job_clean)
+            job_date = job.get('date', '')
+
+            best_match = None
+            best_match_score = 0
+
+            for folder_name, info in folder_info.items():
+                if info['matched_job_id'] is not None:
+                    continue
+
+                folder_normalized = info['normalized_name']
+                folder_date = info['date']
+
+                # If both have dates and they don't match, skip this folder
+                if job_date and folder_date and job_date != folder_date:
+                    continue
+
+                score = 0
+
+                # Exact name match
+                if job_normalized == folder_normalized:
+                    # Higher score if dates match or no dates to compare
+                    if job_date and folder_date and job_date == folder_date:
+                        score = 4  # Best: exact name + exact date
+                    elif not job_date or not folder_date:
+                        score = 2  # Good: exact name, one or both missing date
+                    # If dates don't match, score stays 0 (skip)
+
+                # Partial match (one contains the other) - only for longer names
+                elif len(job_normalized) >= 10 and len(folder_normalized) >= 10:
+                    if job_normalized in folder_normalized or folder_normalized in job_normalized:
+                        if job_date and folder_date and job_date == folder_date:
+                            score = 3  # Good: partial name + exact date
+                        elif not job_date or not folder_date:
+                            score = 1  # OK: partial name, one or both missing date
+                        # If dates don't match, score stays 0 (skip)
+
+                if score > best_match_score:
+                    best_match_score = score
+                    best_match = folder_name
+
+            # If we found a match, mark the folder as matched
+            if best_match and best_match_score > 0:
+                folder_info[best_match]['matched_job_id'] = job_id
+                existing[job_id] = {
+                    'title': job['title'],
+                    'title_clean': job_clean,
+                    'folder': best_match,
+                    'cv_count': folder_info[best_match]['cv_count'],
+                    'total_candidates': job.get('total_candidates', 0),
+                    'date': job_date
+                }
 
         return existing
 
@@ -1217,15 +1296,22 @@ class IndeedDownloader:
         for job_id, info in existing_jobs.items():
             cv_count = info['cv_count']
             total = info['total_candidates']
-            title = info['title']
+            # Use cleaned title for display
+            title = info.get('title_clean', info['title'])
+            folder = info['folder']
+            date = info.get('date', '')
+
+            # Format title with date for clarity
+            title_with_date = f"{title} ({date})" if date else title
 
             if total > cv_count:
                 jobs_with_new.append((job_id, info))
-                print(f"   [NEW] {title}")
+                print(f"   [NEW] {title_with_date}")
+                print(f"         Dossier: {folder}")
                 print(f"         {cv_count} CVs telecharges / {total} candidats (+{total - cv_count} nouveaux)")
             else:
                 jobs_complete.append((job_id, info))
-                print(f"   [OK]  {title} ({cv_count} CVs)")
+                print(f"   [OK]  {title_with_date} ({cv_count} CVs)")
 
         print()
         if jobs_with_new:
