@@ -66,7 +66,8 @@ class IndeedDownloader:
             'total_processed': 0,
             'downloaded': 0,
             'skipped': 0,
-            'failed': 0
+            'failed': 0,
+            'archived': 0  # Jobs with no candidates (too old/archived)
         }
         self.start_time = None
 
@@ -198,7 +199,9 @@ class IndeedDownloader:
         # Setup Chrome options
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_argument('--log-level=3')  # Suppress Chrome logs
+        chrome_options.add_argument('--silent')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
 
@@ -639,29 +642,35 @@ class IndeedDownloader:
 
         return list(all_candidates.values()), total_announced
 
-    def _download_all_candidates_api(self):
-        """Download all candidates via API with multiple passes to bypass 3000 limit"""
+    def _download_all_candidates_api(self, job_total_candidates: int = 0):
+        """Download all candidates via API with multiple passes to bypass 3000 limit
+
+        Args:
+            job_total_candidates: Total candidates from job listing (used to decide if we need multi-pass)
+        """
         print("\nRecuperation des candidats via API...")
 
         # All disposition types
         all_dispositions = ["NEW", "PENDING", "PHONE_SCREENED", "INTERVIEWED", "OFFER_MADE", "REVIEWED"]
         all_candidates = {}  # key: legacy_id, value: candidate dict
-        total_announced = 0
 
         # Passe 1: Tri par date DESC (défaut)
         print("   Recuperation des candidats...")
-        candidates, total_announced = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "DESCENDING")
+        candidates, api_total = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "DESCENDING")
         for c in candidates:
             if c['legacy_id'] not in all_candidates:
                 all_candidates[c['legacy_id']] = c
         print(f"      {len(all_candidates)} recuperes")
 
-        # Si on a tout récupéré ou si <= 3000 annoncés, pas besoin de passes supplémentaires
-        if len(all_candidates) >= total_announced or total_announced <= 3000:
+        # Use job_total_candidates if available (more accurate), otherwise use API total
+        total_expected = job_total_candidates if job_total_candidates > 0 else api_total
+
+        # Si on a tout récupéré ou si <= 3000 attendus, pas besoin de passes supplémentaires
+        if len(all_candidates) >= total_expected or total_expected <= 3000:
             pass  # On a tout, pas besoin de passes supplémentaires
         else:
             # Passes supplémentaires pour dépasser la limite de 3000
-            print(f"   Limite API atteinte ({len(all_candidates)}/{total_announced}), passes supplementaires...")
+            print(f"   Limite API atteinte ({len(all_candidates)}/{total_expected}), passes supplementaires...")
 
             # Passe 2: Tri par date ASC
             print("   Passe 2: Par date (ancien -> recent)...")
@@ -674,7 +683,7 @@ class IndeedDownloader:
             print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
             # Passe 3: Tri par nom ASC (si encore manquant)
-            if len(all_candidates) < total_announced:
+            if len(all_candidates) < total_expected:
                 print("   Passe 3: Par nom (A -> Z)...")
                 candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "ASCENDING")
                 new_count = 0
@@ -685,7 +694,7 @@ class IndeedDownloader:
                 print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
             # Passe 4: Tri par nom DESC (si encore manquant)
-            if len(all_candidates) < total_announced:
+            if len(all_candidates) < total_expected:
                 print("   Passe 4: Par nom (Z -> A)...")
                 candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "DESCENDING")
                 new_count = 0
@@ -696,7 +705,7 @@ class IndeedDownloader:
                 print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
             # Passe 5: Par statut individuel (si >1000 manquants)
-            if len(all_candidates) < total_announced and (total_announced - len(all_candidates)) > 1000:
+            if len(all_candidates) < total_expected and (total_expected - len(all_candidates)) > 1000:
                 print("   Passe 5: Par statut individuel...")
                 for disp in all_dispositions:
                     for sort_by in ["APPLY_DATE", "NAME"]:
@@ -713,11 +722,16 @@ class IndeedDownloader:
 
         all_candidates_list = list(all_candidates.values())
 
-        print(f"\n   Total annonce: {total_announced} | Recuperes: {len(all_candidates_list)}")
+        print(f"\n   Total attendu: {total_expected} | Recuperes: {len(all_candidates_list)}")
 
-        if len(all_candidates_list) < total_announced:
-            missing = total_announced - len(all_candidates_list)
-            pct = (len(all_candidates_list) / total_announced) * 100
+        if len(all_candidates_list) == 0 and total_expected > 0:
+            print(f"   Aucun candidat recupere - job trop ancien ou donnees archivees")
+            self.stats['archived'] += 1
+            return
+
+        if len(all_candidates_list) < total_expected:
+            missing = total_expected - len(all_candidates_list)
+            pct = (len(all_candidates_list) / total_expected) * 100
             print(f"   Note: {missing} candidats non recuperes ({pct:.1f}% recuperes)")
 
         # Load already processed names (PDFs + no_cv.txt)
@@ -1419,12 +1433,45 @@ class IndeedDownloader:
 
             print("Choix invalide, tapez S, N ou K")
 
+    def _filter_old_jobs(self, jobs: list) -> list:
+        """Filter out jobs older than 2 years (Indeed archives candidate data after ~2 years)"""
+        from datetime import datetime, timedelta
+
+        two_years_ago = datetime.now() - timedelta(days=730)  # ~2 years
+        filtered_jobs = []
+        old_jobs_count = 0
+
+        for job in jobs:
+            job_date = job.get('date', '')
+            if job_date:
+                try:
+                    # Parse date format: DD-MM-YYYY
+                    parsed_date = datetime.strptime(job_date, '%d-%m-%Y')
+                    if parsed_date < two_years_ago:
+                        old_jobs_count += 1
+                        continue
+                except:
+                    pass
+            filtered_jobs.append(job)
+
+        if old_jobs_count > 0:
+            print(f"\n   {old_jobs_count} jobs de plus de 2 ans ignores (donnees archivees par Indeed)")
+
+        return filtered_jobs
+
     def run_all_jobs(self):
         """Process all jobs"""
         jobs = self.fetch_all_jobs()
 
         if not jobs:
             print("Aucun job trouve")
+            return
+
+        # Filter out jobs older than 2 years (Indeed archives data)
+        jobs = self._filter_old_jobs(jobs)
+
+        if not jobs:
+            print("Aucun job recent a traiter (tous > 2 ans)")
             return
 
         # Check for existing folders (compare by name, not checkpoint)
@@ -1452,7 +1499,7 @@ class IndeedDownloader:
             if self.mode == 'backend':
                 # Close any modals that might appear
                 self._close_modals()
-                self._download_all_candidates_api()
+                self._download_all_candidates_api(job.get('total_candidates', 0))
             else:
                 # Navigate to job
                 self.driver.get(f"https://employers.indeed.com/candidates?selectedJobs={job['id']}")
@@ -1469,12 +1516,14 @@ class IndeedDownloader:
     def print_statistics(self):
         """Print final statistics"""
         print("\n" + "=" * 60)
-        print("📊 STATISTIQUES")
+        print("STATISTIQUES")
         print("=" * 60)
-        print(f"Total traités:  {self.stats['total_processed']}")
-        print(f"✅ Téléchargés: {self.stats['downloaded']}")
-        print(f"⏭️ Ignorés:     {self.stats['skipped']}")
-        print(f"❌ Échecs:      {self.stats['failed']}")
+        print(f"Total traites:  {self.stats['total_processed']}")
+        print(f"Telecharges:    {self.stats['downloaded']}")
+        print(f"Ignores:        {self.stats['skipped']}")
+        print(f"Echecs:         {self.stats['failed']}")
+        if self.stats['archived'] > 0:
+            print(f"Jobs archives:  {self.stats['archived']} (donnees non disponibles)")
 
         if self.start_time:
             elapsed = time.time() - self.start_time

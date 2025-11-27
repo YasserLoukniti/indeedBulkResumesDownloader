@@ -1,6 +1,6 @@
 # Indeed CV Downloader
 
-**Version 2.3.4**
+**Version 2.4.0**
 
 Automated tool to bulk download resumes from Indeed Employer platform.
 
@@ -247,16 +247,18 @@ For issues or questions, open a GitHub issue with:
 
 ## Changelog
 
-### v2.3.4 (2025-11-27)
+### v2.4.0 (2025-11-27)
 
 **New Features:**
+- **Auto-filter old jobs**: Jobs older than 2 years are automatically skipped (Indeed archives candidate data after ~2 years)
 - **Tracks candidates without CV**: Saves names of candidates without CV to `no_cv.txt` in job folder
-- **Accurate job completion**: Jobs now correctly marked as complete (counts PDFs + no_cv.txt entries)
-- **Fixed NewOnly option**: Now properly returns jobs with new candidates
+- **Archived jobs stats**: Shows count of jobs with no data available in final statistics
+- **Multi-pass uses job total**: Now uses the actual candidate count from job listing (not API limit) to trigger multi-pass fetch
 
 **Improvements:**
-- Removed checkpoint-based filtering (was causing issues with NewOnly)
-- Job + date is the only identifier needed (no more checkpoint IDs)
+- Suppressed Chrome console errors (GCM deprecated endpoint messages)
+- Better handling of archived/old jobs with clear messaging
+- Removed checkpoint-based filtering (job name + date is the only identifier needed)
 - Clearer output: shows candidates with CV, without CV, and already processed separately
 
 ### v2.3.3 (2025-11-27)
