@@ -623,11 +623,11 @@ class IndeedDownloader:
                     resume = data.get('resume', {})
                     download_url = resume.get('downloadUrl') if resume else None
 
-                    if legacy_id and download_url and legacy_id not in all_candidates:
+                    if legacy_id and legacy_id not in all_candidates:
                         all_candidates[legacy_id] = {
                             'name': name,
                             'legacy_id': legacy_id,
-                            'download_url': download_url
+                            'download_url': download_url  # Can be None if no CV
                         }
                 except:
                     continue
@@ -720,43 +720,62 @@ class IndeedDownloader:
             pct = (len(all_candidates_list) / total_announced) * 100
             print(f"   Note: {missing} candidats non recuperes ({pct:.1f}% recuperes)")
 
-        # Load downloaded names by scanning existing PDF files
-        # This is the only reliable way to know what's already downloaded
-        downloaded_names = set()
+        # Load already processed names (PDFs + no_cv.txt)
+        processed_names = set()
         if self.current_job_folder and self.current_job_folder.exists():
+            # Scan PDF files
             for pdf_file in self.current_job_folder.glob('*.pdf'):
                 # Format: "Jean Dupont_20251126_154317.pdf"
                 name_part = pdf_file.stem.rsplit('_', 2)[0]  # Get "Jean Dupont"
                 if name_part:
-                    # Normalize name for comparison
                     clean_name = "".join(ch for ch in name_part if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
-                    downloaded_names.add(clean_name)
-            if downloaded_names:
-                print(f"   {len(downloaded_names)} CVs deja presents dans le dossier")
+                    processed_names.add(clean_name)
 
-        # Filter already downloaded (by name)
-        to_download = []
+            # Load no_cv.txt (candidates without CV)
+            no_cv_file = self.current_job_folder / 'no_cv.txt'
+            if no_cv_file.exists():
+                with open(no_cv_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        name = line.strip()
+                        if name:
+                            clean_name = "".join(ch for ch in name if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
+                            processed_names.add(clean_name)
+
+            if processed_names:
+                print(f"   {len(processed_names)} candidats deja traites dans le dossier")
+
+        # Separate candidates with CV and without CV
+        candidates_with_cv = []
+        candidates_no_cv = []
         for c in all_candidates_list:
-            # Clean candidate name for comparison
             clean_name = "".join(ch for ch in c['name'] if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
-            if clean_name in downloaded_names:
-                continue
-            to_download.append(c)
+            if clean_name in processed_names:
+                continue  # Already processed
+            if c['download_url']:
+                candidates_with_cv.append(c)
+            else:
+                candidates_no_cv.append(c)
 
-        already_done = len(all_candidates_list) - len(to_download)
-        print(f"\n   A telecharger: {len(to_download)} (deja fait: {already_done})")
+        # Save candidates without CV to no_cv.txt
+        if candidates_no_cv and self.current_job_folder:
+            no_cv_file = self.current_job_folder / 'no_cv.txt'
+            with open(no_cv_file, 'a', encoding='utf-8') as f:
+                for c in candidates_no_cv:
+                    f.write(c['name'] + '\n')
+            print(f"   {len(candidates_no_cv)} candidats sans CV (sauvegardes dans no_cv.txt)")
 
-        if not to_download:
+        already_done = len(all_candidates_list) - len(candidates_with_cv) - len(candidates_no_cv)
+        print(f"\n   A telecharger: {len(candidates_with_cv)} (deja fait: {already_done}, sans CV: {len(candidates_no_cv)})")
+
+        if not candidates_with_cv:
             print("   Tous les CVs sont deja telecharges!")
             return
 
         print(f"\n   Telechargement...\n")
 
-        with tqdm(total=len(to_download), desc="   CVs") as pbar:
-            for candidate in to_download:
-                if self.download_cv_api(candidate):
-                    # Save to job-specific checkpoint (ID + name)
-                    self._save_job_checkpoint(candidate['legacy_id'], candidate['name'])
+        with tqdm(total=len(candidates_with_cv), desc="   CVs") as pbar:
+            for candidate in candidates_with_cv:
+                self.download_cv_api(candidate)
                 pbar.update(1)
 
     # ==================== FRONTEND MODE (Selenium) ====================
@@ -1196,7 +1215,12 @@ class IndeedDownloader:
                     date = match.group(2)
                     clean_name = self._clean_job_title(job_name)
                     normalized = normalize(clean_name)
+                    # Count PDFs + no_cv.txt entries
                     cv_count = len(list(folder.glob('*.pdf')))
+                    no_cv_file = folder / 'no_cv.txt'
+                    if no_cv_file.exists():
+                        with open(no_cv_file, 'r', encoding='utf-8') as f:
+                            cv_count += sum(1 for line in f if line.strip())
                     folder_info[folder.name] = {
                         'original_name': job_name,
                         'clean_name': clean_name,
@@ -1208,7 +1232,12 @@ class IndeedDownloader:
                 else:
                     clean_name = self._clean_job_title(folder.name)
                     normalized = normalize(clean_name)
+                    # Count PDFs + no_cv.txt entries
                     cv_count = len(list(folder.glob('*.pdf')))
+                    no_cv_file = folder / 'no_cv.txt'
+                    if no_cv_file.exists():
+                        with open(no_cv_file, 'r', encoding='utf-8') as f:
+                            cv_count += sum(1 for line in f if line.strip())
                     folder_info[folder.name] = {
                         'original_name': folder.name,
                         'clean_name': clean_name,
@@ -1319,7 +1348,12 @@ class IndeedDownloader:
         return existing
 
     def _ask_skip_existing_jobs(self, jobs: list, existing_jobs: dict) -> list:
-        """Ask user which existing jobs to skip"""
+        """Ask user which existing jobs to skip
+
+        Args:
+            jobs: List of all jobs
+            existing_jobs: Dict of jobs that have existing folders
+        """
         if not existing_jobs:
             return jobs
 
@@ -1373,8 +1407,8 @@ class IndeedDownloader:
 
             elif choice == 'N':
                 # Only jobs with new candidates
-                jobs_to_skip = set(job_id for job_id, _ in jobs_complete)
-                filtered_jobs = [j for j in jobs if j['id'] not in jobs_to_skip]
+                jobs_with_new_ids = set(job_id for job_id, _ in jobs_with_new)
+                filtered_jobs = [j for j in jobs if j['id'] in jobs_with_new_ids]
                 print(f"\n{len(jobs_complete)} jobs complets ignores, {len(filtered_jobs)} a traiter")
                 return filtered_jobs
 
@@ -1387,27 +1421,14 @@ class IndeedDownloader:
 
     def run_all_jobs(self):
         """Process all jobs"""
-        all_jobs = self.fetch_all_jobs()
+        jobs = self.fetch_all_jobs()
 
-        if not all_jobs:
+        if not jobs:
             print("Aucun job trouve")
             return
 
-        # Check for existing folders BEFORE filtering completed jobs
-        # This ensures we show all existing folders, even for completed jobs
-        existing_jobs = self._find_existing_job_folders(all_jobs)
-
-        # Filter completed jobs from checkpoint
-        jobs = [j for j in all_jobs if j['id'] not in self.checkpoint_data['completed_jobs']]
-
-        # Show completed jobs count
-        completed_count = len(all_jobs) - len(jobs)
-        if completed_count > 0:
-            print(f"\n   ({completed_count} jobs deja completes dans le checkpoint, ignores)")
-
-        if not jobs and not existing_jobs:
-            print("Tous les jobs sont deja completes!")
-            return
+        # Check for existing folders (compare by name, not checkpoint)
+        existing_jobs = self._find_existing_job_folders(jobs)
 
         if existing_jobs:
             jobs = self._ask_skip_existing_jobs(jobs, existing_jobs)
