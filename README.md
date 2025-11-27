@@ -1,6 +1,6 @@
 # Indeed CV Downloader
 
-**Version 2.4.0**
+**Version 2.5.0**
 
 Automated tool to bulk download resumes from Indeed Employer platform.
 
@@ -246,6 +246,16 @@ For issues or questions, open a GitHub issue with:
 ---
 
 ## Changelog
+
+### v2.5.0 (2025-11-27)
+
+**New Features:**
+- **Download report**: Generates `rapport_telechargement.txt` with summary of all jobs (CVs per job + global totals)
+- **Job completion tracking**: Uses `stats.json` in each job folder to accurately track processed candidates
+
+**Bug Fixes:**
+- Fixed job marked as `[NEW]` when already complete (now uses exact processed count instead of PDF count)
+- Fixed stats tracking for jobs >3000 candidates (uses actual job total, not API-recovered count)
 
 ### v2.4.0 (2025-11-27)
 
