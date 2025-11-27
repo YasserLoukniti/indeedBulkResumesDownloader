@@ -1,18 +1,29 @@
 # Indeed CV Downloader
 
+**Version 2.1.0**
+
 Automated tool to bulk download resumes from Indeed Employer platform.
 
 ## Features
 
+### Core Features
 - Automatic bulk CV/resume download
 - Session-based authentication (no credentials needed)
 - Smart resume on interruption with checkpoint system
-- **Smart skip**: Automatically skips already downloaded candidates in batch
-- Progress tracking with real-time statistics and time tracking
+- **Smart skip**: Automatically skips already downloaded candidates
+- Progress tracking with real-time statistics
 - Configurable delays and parameters
 - Automatic file naming with candidate names
-- Bilingual support (English "Download resume" / French "Télécharger le CV")
-- Error handling and retry logic
+- Bilingual support (English / French)
+
+### Multi-Job Manager (v2.1)
+- **All jobs at once**: Fetch and process all jobs from Indeed Employer dashboard
+- **HTML table parsing**: Reliable extraction via pagination buttons
+- **Smart comparison**: Compare jobs with existing download folders
+- **New candidates detection**: Only download new CVs since last run
+- **Clean folder names**: Removes H/F variants, replaces `/` with `-`
+- **Status filter**: Filter by Open, Paused, or Closed jobs
+- **Backend/Frontend modes**: API (fast) or Selenium (stable)
 
 ## Prerequisites
 
@@ -34,9 +45,8 @@ Pre-built executables are available in the `dist/` folder:
 1. Export your cookies from Chrome (see "Export your Indeed cookies" below)
 2. Save the file as `logs/indeed_cookies.txt`
 3. Run `ConvertCookies.exe` to convert to JSON format
-4. Open Indeed Employer in Chrome and navigate to your candidates list
-5. Run `IndeedCVDownloader.exe`
-6. Click on the first candidate you want to download, then press Enter
+4. Run `IndeedCVDownloader.exe`
+5. Choose your options in the menu
 
 ## Installation (Python)
 
@@ -60,7 +70,7 @@ pip install -r requirements.txt
 1. Install "Get cookies.txt" Chrome extension
 2. Navigate to `https://employers.indeed.com/candidates`
 3. Click the extension icon and export cookies
-4. Save as `employers.indeed.com_cookies.txt` in project folder
+4. Save as `logs/indeed_cookies.txt`
 
 **Method 2: Using Console**
 
@@ -71,14 +81,71 @@ pip install -r requirements.txt
 
 ### 4. Convert cookies to JSON
 
-1. Save your exported cookies as `logs/indeed_cookies.txt`
-2. Run the converter:
-
 ```bash
 python convert_cookies.py
 ```
 
 This will read `logs/indeed_cookies.txt` and create `logs/indeed_cookies.json`.
+
+## Usage
+
+### Run the main script
+
+```bash
+python indeed_downloader.py
+```
+
+### Menu Options
+
+1. **Download Mode**:
+   - `Backend (API)` - Faster, parallel downloads via GraphQL
+   - `Frontend (Selenium)` - More stable, simulates clicks
+
+2. **Job Selection**:
+   - `Single job` - Navigate to a specific job manually
+   - `All jobs` - Process all jobs automatically
+
+3. **Status Filter** (for All jobs mode):
+   - Open only
+   - Paused only
+   - Closed only
+   - Open + Paused
+   - All statuses
+
+### Example Output
+
+```
+Recuperation de la liste des jobs...
+   URL: https://employers.indeed.com/jobs?status=open,paused,closed
+   Page 1...
+      25 jobs sur cette page (total: 25)
+   Page 2...
+      25 jobs sur cette page (total: 50)
+   ...
+
+145 jobs recuperes
+
+Liste des jobs:
+------------------------------------------------------------
+     1. [O] Business Developer
+        Date: 22-09-2025 | Candidats: 237
+     2. [P] Data Scientist
+        Date: 01-07-2025 | Candidats: 550
+     3. [F] Marketing Manager
+        Date: 15-06-2025 | Candidats: 120
+------------------------------------------------------------
+
+JOBS DEJA PRESENTS DANS LE DOSSIER DOWNLOADS:
+============================================================
+   [NEW] Data Scientist
+         450 CVs telecharges / 550 candidats (+100 nouveaux)
+   [OK]  Marketing Manager (120 CVs)
+
+Options:
+   [S] SkipAll - Ignorer TOUS les jobs existants
+   [N] NewOnly - Telecharger seulement les jobs avec nouveaux candidats
+   [K] KeepAll - Telecharger quand meme tous les jobs
+```
 
 ## Configuration
 
@@ -86,85 +153,15 @@ Edit `.env.config` to customize parameters:
 
 ```bash
 # Download speeds
-DOWNLOAD_DELAY=0.5              # Delay after clicking download button (seconds)
+DOWNLOAD_DELAY=0.5              # Delay after clicking download button
 NEXT_CANDIDATE_DELAY=1.0        # Delay after navigating to next candidate
-BETWEEN_CANDIDATES_DELAY=0.5    # Delay between each candidate
-PAGE_LOAD_DELAY=5               # Initial page load wait time
 
 # Download limit
-MAX_CVS=10                      # Number of CVs to download (set to 3000 for all)
-
-# Timeouts
-DOWNLOAD_VERIFY_TIMEOUT=30      # Timeout for download verification
+MAX_CVS=3000                    # Number of CVs to download per job
 
 # Directories
 DOWNLOAD_FOLDER=downloads       # CV download directory
 LOG_FOLDER=logs                 # Logs and checkpoints directory
-```
-
-### Performance Presets
-
-**Ultra-Fast** (~2s per CV, ~1h40 for 3000 CVs)
-
-```
-DOWNLOAD_DELAY=0.5
-NEXT_CANDIDATE_DELAY=1.0
-BETWEEN_CANDIDATES_DELAY=0.5
-```
-
-**Stable** (~4s per CV, ~3h20 for 3000 CVs) - Recommended
-
-```
-DOWNLOAD_DELAY=1.0
-NEXT_CANDIDATE_DELAY=1.5
-BETWEEN_CANDIDATES_DELAY=1.0
-```
-
-**Safe** (~8s per CV, ~6h40 for 3000 CVs)
-
-```
-DOWNLOAD_DELAY=2.0
-NEXT_CANDIDATE_DELAY=3.0
-BETWEEN_CANDIDATES_DELAY=2.0
-```
-
-## Usage
-
-### 1. Close Chrome completely
-
-Ensure all Chrome windows are closed before running the script.
-
-### 2. Run the script
-
-```bash
-python indeed_with_cookies.py
-```
-
-### 3. Follow the prompts
-
-1. Open Indeed Employer in Chrome and go to your candidates list
-2. Run the script - it opens Chrome with your saved cookies
-3. **Click on the first candidate** you want to download
-4. Press Enter to start automatic download
-5. Script downloads CVs and navigates automatically through the list
-
-### 4. Monitor progress
-
-```
-CVs: 150it [25:30, 10.20s/it]
-
-============================================================
-📊 STATISTIQUES
-============================================================
-Total:      150
-✅ Réussis:  145
-❌ Échecs:   3
-⏭️ Ignorés:  2
-Taux:       96.67%
-
-⏱️ Temps total: 0h 25m 30s
-⏱️ Moyenne/CV:  10.6s
-============================================================
 ```
 
 ## Resume from Interruption
@@ -178,7 +175,7 @@ If the script stops (Ctrl+C, error, or internet issue):
 To start fresh:
 
 ```bash
-del logs\checkpoint.json
+del logs\checkpoint_unified.json
 ```
 
 ## File Structure
@@ -186,54 +183,43 @@ del logs\checkpoint.json
 ```
 indeed-cv-downloader/
 ├── dist/                       # Standalone executables
-│   ├── IndeedCVDownloader.exe  # Main application (no Python needed)
-│   └── ConvertCookies.exe      # Cookie converter (no Python needed)
-├── indeed_with_cookies.py      # Main script (Python version)
-├── convert_cookies.py          # Cookie converter utility (Python version)
+│   ├── IndeedCVDownloader.exe  # Main application
+│   └── ConvertCookies.exe      # Cookie converter
+├── indeed_downloader.py        # Main unified script
+├── convert_cookies.py          # Cookie converter utility
 ├── requirements.txt            # Python dependencies
 ├── .env.config                 # Configuration file
-├── .gitignore                  # Git ignore rules
-├── downloads/                  # Downloaded CVs (PDF format)
-│   └── Candidate_Name_YYYYMMDD_HHMMSS.pdf
+├── downloads/                  # Downloaded CVs organized by job
+│   ├── Job Title (DD-MM-YYYY)/
+│   │   ├── Candidate_Name_timestamp.pdf
+│   │   └── checkpoint.json
+│   └── ...
 └── logs/                       # Logs and checkpoints
-    ├── checkpoint.json         # Resume state
-    ├── indeed_cookies.txt      # Exported cookies (Netscape format)
-    ├── indeed_cookies.json     # Converted cookies (JSON format)
-    └── scraper_*.log          # Execution logs
+    ├── checkpoint_unified.json # Global resume state
+    ├── indeed_cookies.txt      # Exported cookies (Netscape)
+    └── indeed_cookies.json     # Converted cookies (JSON)
 ```
 
 ## Troubleshooting
 
 ### Cookies expired
-
 Re-export cookies from your browser and run `convert_cookies.py` again.
 
 ### Chrome profile error
+Close all Chrome windows before running the script.
 
-The script uses a clean Chrome session. Close all Chrome windows before running.
+### Missing jobs in list
+The script now uses HTML table pagination. If some jobs are missing, check if the page loaded correctly.
 
 ### Download verification failed
-
-Increase `DOWNLOAD_DELAY` in `.env.config` to give more time for PDFs to download.
-
-### No candidates found
-
-Ensure you're on the correct Indeed Employer URL and have candidates in your list.
+Increase `DOWNLOAD_DELAY` in `.env.config`.
 
 ## Important Notes
 
 - Uses your active browser session (no password storage)
 - Cookies expire after ~24 hours, re-export when needed
-- Rate limiting prevents Indeed from blocking your IP
 - All downloaded CVs are saved with timestamps
 - Checkpoint system ensures no duplicates
-
-## Performance Tips
-
-1. **Test first**: Run with `MAX_CVS=10` before bulk download
-2. **Stable connection**: Use ethernet, not WiFi
-3. **Overnight runs**: For large batches (1000+ CVs)
-4. **Monitor logs**: Check `logs/` folder for issues
 
 ## Legal & Ethics
 
@@ -253,7 +239,54 @@ Pull requests welcome. For major changes, open an issue first.
 ## Support
 
 For issues or questions, open a GitHub issue with:
-
 - Error message from logs
 - Configuration used
 - Steps to reproduce
+
+---
+
+## Changelog
+
+### v2.1.0 (2025-11-27)
+
+**New Features:**
+- Unified script `indeed_downloader.py` replaces all previous scripts
+- Interactive menu for mode selection (Backend/Frontend, Single/All jobs)
+- HTML table parsing with pagination for reliable job fetching
+- Status filter in URL (`open`, `paused`, `closed`)
+- Display all jobs with cleaned names after fetching
+- New option `[N] NewOnly` to download only jobs with new candidates
+
+**Improvements:**
+- Clean job titles: removes `(H/F)`, `H/F`, replaces `/` with `-`
+- Better folder matching with cleaned names
+- Shows CV count vs total candidates for existing folders
+- Improved pagination with scroll and wait times
+
+**Removed:**
+- `indeed_jobs_manager.py` (merged into main script)
+- `indeed_parallel.py` (merged into main script)
+- `indeed_with_cookies.py` (merged into main script)
+- `capture_requests.py` (debug script)
+
+### v2.0.0 (2025-11-27)
+
+**New Features:**
+- Multi-job management system
+- Compare jobs with existing download folders
+- Detect new candidates since last download
+- Organize downloads by job folder
+
+### v1.1.0 (2025-11-20)
+
+**New Features:**
+- Parallel download via GraphQL API
+- Automatic header capture from network requests
+
+### v1.0.0 (2025-11-15)
+
+**Initial Release:**
+- Cookie-based authentication
+- Checkpoint system for resume on interruption
+- Smart skip for already downloaded candidates
+- Standalone executables

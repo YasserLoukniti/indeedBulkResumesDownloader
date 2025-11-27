@@ -43,8 +43,10 @@ downloads/*.pdf
 downloads/*.doc
 downloads/*.docx
 logs/*.log
-logs/checkpoint.json
-logs/indeed_cookies.json
+logs/*.json
+
+# Spec files
+*.spec
 
 # Keep folders
 !downloads/.gitkeep

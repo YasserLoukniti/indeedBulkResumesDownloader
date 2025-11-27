@@ -1,0 +1,1152 @@
+"""
+Indeed CV Downloader - Unified Script
+Supports both Backend (API parallel) and Frontend (Selenium clicks) modes
+Can process single job or all jobs automatically
+"""
+
+import os
+import sys
+import json
+import time
+import re
+import base64
+from urllib.parse import urlparse, parse_qs, unquote
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+from dotenv import load_dotenv
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
+import chromedriver_autoinstaller
+from tqdm import tqdm
+
+# Load environment variables
+load_dotenv('.env.config')
+
+
+class IndeedDownloader:
+    def __init__(self):
+        # Config from .env
+        self.download_folder = os.getenv('DOWNLOAD_FOLDER', 'downloads')
+        self.log_folder = os.getenv('LOG_FOLDER', 'logs')
+        self.max_cvs = int(os.getenv('MAX_CVS', 3000))
+        self.parallel_downloads = int(os.getenv('PARALLEL_DOWNLOADS', 10))
+        self.download_delay = float(os.getenv('DOWNLOAD_DELAY', 0.5))
+        self.next_candidate_delay = float(os.getenv('NEXT_CANDIDATE_DELAY', 1.0))
+
+        # Create folders
+        Path(self.download_folder).mkdir(exist_ok=True)
+        Path(self.log_folder).mkdir(exist_ok=True)
+
+        # Session state
+        self.driver = None
+        self.wait = None
+        self.api_key = None
+        self.ctk = None
+        self.cookies = {}
+
+        # Current job info
+        self.current_job_id = None
+        self.current_job_name = None
+        self.current_job_folder = None
+
+        # Checkpoint
+        self.checkpoint_file = Path(self.log_folder) / 'checkpoint_unified.json'
+        self.checkpoint_data = self._load_checkpoint()
+
+        # Stats
+        self.stats = {
+            'total_processed': 0,
+            'downloaded': 0,
+            'skipped': 0,
+            'failed': 0
+        }
+        self.start_time = None
+
+        # Mode settings
+        self.mode = None  # 'backend' or 'frontend'
+        self.job_mode = None  # 'single' or 'all'
+        self.job_statuses = []  # ['ACTIVE', 'PAUSED', 'CLOSED']
+
+    def _load_checkpoint(self) -> dict:
+        """Load checkpoint data"""
+        if self.checkpoint_file.exists():
+            with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {
+            'downloaded_names': [],
+            'downloaded_ids': [],
+            'completed_jobs': []
+        }
+
+    def _save_checkpoint(self, name: str = None, legacy_id: str = None, job_id: str = None):
+        """Save checkpoint"""
+        if name and name not in self.checkpoint_data['downloaded_names']:
+            self.checkpoint_data['downloaded_names'].append(name)
+        if legacy_id and legacy_id not in self.checkpoint_data['downloaded_ids']:
+            self.checkpoint_data['downloaded_ids'].append(legacy_id)
+        if job_id and job_id not in self.checkpoint_data['completed_jobs']:
+            self.checkpoint_data['completed_jobs'].append(job_id)
+
+        with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
+            json.dump(self.checkpoint_data, f, ensure_ascii=False, indent=2)
+
+    def show_menu(self):
+        """Display main menu and get user choices"""
+        print("""
+╔════════════════════════════════════════════════════════════╗
+║         Indeed CV Downloader - Version Unifiée             ║
+╚════════════════════════════════════════════════════════════╝
+""")
+
+        # Mode selection
+        print("📥 MODE DE TÉLÉCHARGEMENT:")
+        print("   1. Backend (API) - Plus rapide, téléchargements parallèles")
+        print("   2. Frontend (Selenium) - Plus stable, clics simulés")
+        print()
+
+        while True:
+            choice = input("Choix (1/2): ").strip()
+            if choice == '1':
+                self.mode = 'backend'
+                break
+            elif choice == '2':
+                self.mode = 'frontend'
+                break
+            print("❌ Choix invalide")
+
+        print()
+
+        # Job mode selection
+        print("📋 MODE DE SÉLECTION DES JOBS:")
+        print("   1. Job unique - Vous naviguez vers le job souhaité")
+        print("   2. Tous les jobs - Parcourt automatiquement tous les jobs")
+        print()
+
+        while True:
+            choice = input("Choix (1/2): ").strip()
+            if choice == '1':
+                self.job_mode = 'single'
+                break
+            elif choice == '2':
+                self.job_mode = 'all'
+                break
+            print("❌ Choix invalide")
+
+        # Status filter (only for 'all' mode)
+        if self.job_mode == 'all':
+            print()
+            print("📊 STATUT DES ANNONCES À TRAITER:")
+            print("   1. Ouvertes uniquement (ACTIVE)")
+            print("   2. Suspendues uniquement (PAUSED)")
+            print("   3. Fermées uniquement (CLOSED)")
+            print("   4. Ouvertes + Suspendues")
+            print("   5. Toutes (Ouvertes + Suspendues + Fermées)")
+            print()
+
+            while True:
+                choice = input("Choix (1-5): ").strip()
+                if choice == '1':
+                    self.job_statuses = ['ACTIVE']
+                    break
+                elif choice == '2':
+                    self.job_statuses = ['PAUSED']
+                    break
+                elif choice == '3':
+                    self.job_statuses = ['CLOSED']
+                    break
+                elif choice == '4':
+                    self.job_statuses = ['ACTIVE', 'PAUSED']
+                    break
+                elif choice == '5':
+                    self.job_statuses = ['ACTIVE', 'PAUSED', 'CLOSED']
+                    break
+                print("❌ Choix invalide")
+
+        print()
+        print("=" * 60)
+        print(f"✅ Mode: {self.mode.upper()}")
+        print(f"✅ Jobs: {'Unique' if self.job_mode == 'single' else 'Tous'}")
+        if self.job_mode == 'all':
+            print(f"✅ Statuts: {', '.join(self.job_statuses)}")
+        print("=" * 60)
+        print()
+
+    def setup_chrome(self) -> bool:
+        """Setup Chrome with cookies"""
+        print("🌐 Ouverture de Chrome...")
+
+        # Load cookies
+        cookies_file = Path(self.log_folder) / 'indeed_cookies.json'
+        if not cookies_file.exists():
+            print(f"❌ Fichier cookies non trouvé: {cookies_file}")
+            return False
+
+        with open(cookies_file, 'r', encoding='utf-8') as f:
+            cookies_list = json.load(f)
+
+        # Install chromedriver
+        chromedriver_autoinstaller.install()
+
+        # Setup Chrome options
+        chrome_options = Options()
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+
+        # Download preferences
+        prefs = {
+            "download.default_directory": str(Path(self.download_folder).absolute()),
+            "download.prompt_for_download": False,
+            "plugins.always_open_pdf_externally": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
+        self.driver = webdriver.Chrome(options=chrome_options)
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        self.driver.maximize_window()
+        self.wait = WebDriverWait(self.driver, 30)
+
+        # Go to Indeed and add cookies
+        print("✅ Création d'une session avec vos cookies")
+        self.driver.get("https://employers.indeed.com")
+        time.sleep(2)
+
+        for cookie in cookies_list:
+            try:
+                cookie_dict = {
+                    'name': cookie['name'],
+                    'value': cookie['value'],
+                    'domain': cookie.get('domain', '.indeed.com'),
+                    'path': cookie.get('path', '/')
+                }
+                self.driver.add_cookie(cookie_dict)
+                self.cookies[cookie['name']] = cookie['value']
+
+                if cookie['name'] == 'CTK':
+                    self.ctk = cookie['value']
+            except:
+                pass
+
+        self.driver.refresh()
+        time.sleep(3)
+
+        # Capture API key from network logs
+        self._capture_api_key()
+
+        print(f"✅ {len(cookies_list)} cookies chargés")
+        return True
+
+    def _capture_api_key(self):
+        """Capture API key from network logs"""
+        try:
+            # Navigate to candidates to trigger API calls
+            self.driver.get("https://employers.indeed.com/candidates")
+            time.sleep(5)
+
+            logs = self.driver.get_log('performance')
+            for log in logs:
+                try:
+                    message = json.loads(log['message'])['message']
+                    if message['method'] == 'Network.requestWillBeSent':
+                        url = message['params']['request']['url']
+                        if 'graphql' in url and 'apis.indeed.com' in url:
+                            headers = message['params']['request']['headers']
+                            if 'indeed-api-key' in headers:
+                                self.api_key = headers['indeed-api-key']
+                                break
+                except:
+                    continue
+
+            if self.api_key:
+                print(f"   ✅ API Key capturée")
+        except:
+            pass
+
+    def _clean_job_title(self, title: str) -> str:
+        """Nettoie le titre du job pour créer un nom de dossier valide"""
+        # Enlever (H/F), H/F, (F/H), F/H et variantes
+        title = re.sub(r'\s*\(?\s*[HF]\s*/\s*[HF]\s*\)?\s*', '', title, flags=re.IGNORECASE)
+        # Remplacer / par -
+        title = title.replace('/', '-')
+        # Enlever les caractères invalides pour un nom de dossier Windows
+        title = re.sub(r'[<>:"|?*]', '', title)
+        # Enlever les espaces multiples
+        title = re.sub(r'\s+', ' ', title)
+        # Trim
+        title = title.strip()
+        return title
+
+    def _create_job_folder(self, job_name: str, job_date: str = None) -> Path:
+        """Create folder for job with name and date"""
+        # Clean job name for folder
+        safe_name = self._clean_job_title(job_name)
+        safe_name = safe_name[:80]  # Limit length
+
+        if job_date:
+            folder_name = f"{safe_name} ({job_date})"
+        else:
+            folder_name = safe_name
+
+        job_folder = Path(self.download_folder) / folder_name
+        job_folder.mkdir(exist_ok=True)
+
+        self.current_job_folder = job_folder
+        return job_folder
+
+    def _extract_job_id_from_url(self, url: str) -> Optional[str]:
+        """Extract employerJobId from URL"""
+        try:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            if 'selectedJobs' in params:
+                return unquote(params['selectedJobs'][0])
+        except:
+            pass
+        return None
+
+    # ==================== BACKEND MODE (API) ====================
+
+    def fetch_candidates_api(self, offset: int = 0, limit: int = 100):
+        """Fetch candidates using GraphQL API via browser"""
+        query = """query FindRCPMatches($input: OrchestrationMatchesInput!) {
+  findRCPMatches(input: $input) {
+    overallMatchCount
+    matchConnection {
+      pageInfo { hasNextPage }
+      matches {
+        candidateSubmission {
+          id
+          data {
+            profile { name { displayName } }
+            resume {
+              ... on CandidatePdfResume { id, downloadUrl }
+            }
+            ... on IndeedApplyCandidateSubmission { legacyID }
+            ... on EmployerGeneratedCandidateSubmission { legacyID }
+          }
+        }
+      }
+    }
+  }
+}"""
+
+        variables = {
+            "input": {
+                "clientSurfaceName": "candidate-list-page",
+                "defaultStrategyId": "U20GF",
+                "limit": limit,
+                "offset": offset,
+                "context": {
+                    "surfaceContext": [
+                        {"contextKey": "DISPOSITION", "contextPayload": "NEW"},
+                        {"contextKey": "DISPOSITION", "contextPayload": "PENDING"},
+                        {"contextKey": "DISPOSITION", "contextPayload": "PHONE_SCREENED"},
+                        {"contextKey": "DISPOSITION", "contextPayload": "INTERVIEWED"},
+                        {"contextKey": "DISPOSITION", "contextPayload": "OFFER_MADE"},
+                        {"contextKey": "DISPOSITION", "contextPayload": "REVIEWED"},
+                        {"contextKey": "SORT_BY", "contextPayload": "APPLY_DATE"},
+                        {"contextKey": "SORT_ORDER", "contextPayload": "DESCENDING"}
+                    ]
+                },
+                "searchSessionId": f"dl-{int(time.time())}"
+            }
+        }
+
+        if self.current_job_id:
+            variables["input"]["identifiers"] = {
+                "jobIdentifiers": {"employerJobId": self.current_job_id}
+            }
+
+        payload = {"operationName": "FindRCPMatches", "variables": variables, "query": query}
+
+        js_code = f"""
+        return await fetch("https://apis.indeed.com/graphql?co=FR&locale=fr-FR", {{
+            method: "POST",
+            headers: {{
+                "accept": "*/*",
+                "content-type": "application/json",
+                "indeed-api-key": "{self.api_key}",
+                "indeed-ctk": "{self.ctk}",
+                "indeed-client-sub-app": "talent-organization-modules",
+                "indeed-client-sub-app-component": "./CandidateListPage"
+            }},
+            body: JSON.stringify({json.dumps(payload)}),
+            credentials: "include"
+        }}).then(r => r.json());
+        """
+
+        try:
+            result = self.driver.execute_script(js_code)
+            if not result or 'errors' in result:
+                return [], 0
+
+            matches = result.get('data', {}).get('findRCPMatches', {}).get('matchConnection', {}).get('matches', [])
+            total = result.get('data', {}).get('findRCPMatches', {}).get('overallMatchCount', 0)
+            return matches, total
+        except Exception as e:
+            print(f"❌ Erreur API: {e}")
+            return [], 0
+
+    def download_cv_api(self, candidate: dict) -> bool:
+        """Download CV via API"""
+        name = candidate['name']
+        legacy_id = candidate['legacy_id']
+        download_url = candidate['download_url']
+
+        if legacy_id in self.checkpoint_data['downloaded_ids']:
+            self.stats['skipped'] += 1
+            return True
+
+        try:
+            js_code = f"""
+            const response = await fetch("{download_url}", {{ credentials: "include" }});
+            if (!response.ok) {{
+                const altResponse = await fetch("https://employers.indeed.com/api/catws/resume/v2/download?id={legacy_id}", {{ credentials: "include" }});
+                if (!altResponse.ok) return null;
+                const blob = await altResponse.blob();
+                return await new Promise((resolve) => {{
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.readAsDataURL(blob);
+                }});
+            }}
+            const blob = await response.blob();
+            return await new Promise((resolve) => {{
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            }});
+            """
+
+            base64_data = self.driver.execute_script(js_code)
+            if not base64_data:
+                self.stats['failed'] += 1
+                return False
+
+            pdf_data = base64.b64decode(base64_data)
+
+            safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{safe_name}_{timestamp}.pdf"
+
+            folder = self.current_job_folder or Path(self.download_folder)
+            filepath = folder / filename
+
+            with open(filepath, 'wb') as f:
+                f.write(pdf_data)
+
+            if filepath.stat().st_size > 1000:
+                self._save_checkpoint(name=name, legacy_id=legacy_id)
+                self.stats['downloaded'] += 1
+                return True
+            else:
+                filepath.unlink()
+                self.stats['failed'] += 1
+                return False
+
+        except Exception as e:
+            self.stats['failed'] += 1
+            return False
+
+    def run_backend_single_job(self):
+        """Run backend mode for single job"""
+        print("\n" + "=" * 60)
+        print("👆 Naviguez vers le job souhaité dans Chrome")
+        print("   puis appuyez sur Entrée")
+        print("=" * 60)
+        input()
+
+        job_url = self.driver.current_url
+        self.current_job_id = self._extract_job_id_from_url(job_url)
+
+        # Get job name from page
+        try:
+            job_name = self.driver.execute_script("""
+                const el = document.querySelector('[data-testid="job-title"]') ||
+                           document.querySelector('h1') ||
+                           document.querySelector('.job-title');
+                return el ? el.textContent.trim() : 'Job';
+            """)
+            self._create_job_folder(job_name)
+            print(f"📁 Dossier: {self.current_job_folder}")
+        except:
+            pass
+
+        self._download_all_candidates_api()
+
+    def _download_all_candidates_api(self):
+        """Download all candidates via API"""
+        print("\n🔍 Récupération des candidats via API...")
+
+        all_candidates = []
+        offset = 0
+
+        while True:
+            print(f"   Fetching offset {offset}...")
+            matches, total = self.fetch_candidates_api(offset=offset, limit=100)
+
+            if offset == 0:
+                print(f"   📊 Total: {total} candidats")
+
+            if not matches:
+                break
+
+            for match in matches:
+                try:
+                    sub = match.get('candidateSubmission', {})
+                    data = sub.get('data', {})
+                    name = data.get('profile', {}).get('name', {}).get('displayName', 'Unknown')
+                    legacy_id = data.get('legacyID')
+                    resume = data.get('resume', {})
+                    download_url = resume.get('downloadUrl') if resume else None
+
+                    if legacy_id and download_url:
+                        all_candidates.append({
+                            'name': name,
+                            'legacy_id': legacy_id,
+                            'download_url': download_url
+                        })
+                except:
+                    continue
+
+            if len(matches) < 100:
+                break
+            offset += 100
+            time.sleep(0.5)
+
+        # Filter already downloaded
+        to_download = [c for c in all_candidates if c['legacy_id'] not in self.checkpoint_data['downloaded_ids']]
+
+        print(f"\n📊 À télécharger: {len(to_download)} / {len(all_candidates)}")
+
+        if not to_download:
+            print("✅ Tous les CVs sont déjà téléchargés!")
+            return
+
+        print(f"\n🚀 Téléchargement...\n")
+
+        with tqdm(total=len(to_download), desc="CVs") as pbar:
+            for candidate in to_download:
+                self.download_cv_api(candidate)
+                pbar.update(1)
+
+    # ==================== FRONTEND MODE (Selenium) ====================
+
+    def run_frontend_single_job(self):
+        """Run frontend mode for single job"""
+        print("\n" + "=" * 60)
+        print("👆 Naviguez vers le job et cliquez sur le premier candidat")
+        print("   puis appuyez sur Entrée")
+        print("=" * 60)
+        input()
+
+        # Get job name and create folder
+        try:
+            job_name = self.driver.execute_script("""
+                const el = document.querySelector('[data-testid="job-title"]') ||
+                           document.querySelector('h1');
+                return el ? el.textContent.trim() : 'Job';
+            """)
+            self._create_job_folder(job_name)
+            print(f"📁 Dossier: {self.current_job_folder}")
+        except:
+            pass
+
+        self._download_all_candidates_frontend()
+
+    def _download_all_candidates_frontend(self):
+        """Download candidates using Selenium clicks"""
+        print("\n🚀 Téléchargement via Selenium...\n")
+
+        pbar = tqdm(desc="CVs")
+        count = 0
+
+        while count < self.max_cvs:
+            # Get candidate name
+            name = self._get_current_candidate_name()
+            if not name:
+                break
+
+            # Check if already downloaded
+            if name in self.checkpoint_data['downloaded_names']:
+                self.stats['skipped'] += 1
+            else:
+                # Download CV
+                if self._download_cv_frontend(name):
+                    self.stats['downloaded'] += 1
+                else:
+                    self.stats['failed'] += 1
+
+            self.stats['total_processed'] += 1
+            count += 1
+            pbar.update(1)
+
+            # Go to next candidate
+            if not self._go_to_next_candidate():
+                break
+
+            time.sleep(self.next_candidate_delay)
+
+        pbar.close()
+
+    def _get_current_candidate_name(self) -> Optional[str]:
+        """Get name from page"""
+        try:
+            name = self.driver.execute_script("""
+                const el = document.querySelector('[data-testid="name-plate-name-item"] span');
+                return el ? el.textContent.trim() : null;
+            """)
+            return name
+        except:
+            return None
+
+    def _download_cv_frontend(self, name: str) -> bool:
+        """Download CV using click"""
+        try:
+            # Find download button
+            for attempt in range(3):
+                try:
+                    download_link = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((
+                            By.XPATH,
+                            "//a[text()='Download resume' or text()='Télécharger le CV']"
+                        ))
+                    )
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", download_link)
+                    time.sleep(0.2)
+                    self.driver.execute_script("arguments[0].click();", download_link)
+                    break
+                except StaleElementReferenceException:
+                    if attempt == 2:
+                        return False
+                    time.sleep(0.5)
+                except TimeoutException:
+                    return False
+
+            time.sleep(self.download_delay)
+
+            # Verify and rename file
+            if self._verify_and_rename_download(name):
+                self._save_checkpoint(name=name)
+                return True
+            return False
+
+        except Exception as e:
+            return False
+
+    def _verify_and_rename_download(self, name: str) -> bool:
+        """Verify download and rename file"""
+        folder = self.current_job_folder or Path(self.download_folder)
+
+        for _ in range(10):
+            files = list(folder.glob("*.pdf"))
+            for f in files:
+                if f.stat().st_size > 1000 and name.split()[0].lower() not in f.name.lower():
+                    # Rename file
+                    safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    new_name = folder / f"{safe_name}_{timestamp}.pdf"
+                    f.rename(new_name)
+                    return True
+            time.sleep(0.5)
+
+        return False
+
+    def _go_to_next_candidate(self) -> bool:
+        """Navigate to next candidate"""
+        try:
+            current_index = self.driver.execute_script("""
+                const items = document.querySelectorAll('#hanselCandidateListContainer > div > ul > li[data-testid="CandidateListItem"]');
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].getAttribute('aria-current') === 'true' || items[i].getAttribute('data-selected') === 'true') {
+                        return i;
+                    }
+                }
+                return -1;
+            """)
+
+            if current_index == -1:
+                return False
+
+            # Click next candidate
+            clicked = self.driver.execute_script(f"""
+                const items = document.querySelectorAll('#hanselCandidateListContainer > div > ul > li[data-testid="CandidateListItem"]');
+                const nextItem = items[{current_index + 1}];
+                if (!nextItem) {{
+                    // Try to load more
+                    const btn = document.getElementById('fetchNextCandidates') ||
+                               document.querySelector('[data-testid="fetchNextCandidates"]');
+                    if (btn) {{ btn.click(); return 'loading'; }}
+                    return null;
+                }}
+                const btn = nextItem.querySelector('button[data-testid="CandidateListItem-button"]');
+                if (btn) {{
+                    nextItem.scrollIntoView({{block: 'center'}});
+                    btn.click();
+                    return true;
+                }}
+                return null;
+            """)
+
+            if clicked == 'loading':
+                time.sleep(2)
+                return self._go_to_next_candidate()
+
+            return clicked == True
+
+        except Exception as e:
+            return False
+
+    # ==================== ALL JOBS MODE ====================
+
+    def _format_date_fr(self, date_str: str) -> str:
+        """Convertit 'septembre 22, 2025' en '22-09-2025'"""
+        months_fr = {
+            'janvier': '01', 'février': '02', 'mars': '03', 'avril': '04',
+            'mai': '05', 'juin': '06', 'juillet': '07', 'août': '08',
+            'septembre': '09', 'octobre': '10', 'novembre': '11', 'décembre': '12'
+        }
+        try:
+            parts = date_str.lower().split()
+            if len(parts) >= 3:
+                month = months_fr.get(parts[0], '00')
+                day = parts[1].replace(',', '').zfill(2)
+                year = parts[2]
+                return f"{day}-{month}-{year}"
+        except:
+            pass
+        return date_str
+
+    def _extract_jobs_from_page(self) -> list:
+        """Extrait les jobs de la page actuelle du tableau HTML"""
+        jobs = []
+        try:
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "tr[data-testid='job-row']")
+
+            for row in rows:
+                try:
+                    # Titre du job - essayer plusieurs sélecteurs
+                    title_elem = None
+                    job_link = None
+
+                    try:
+                        title_elem = row.find_element(By.CSS_SELECTOR, "span[data-testid='UnifiedJobTldTitle'] a")
+                    except:
+                        pass
+
+                    if not title_elem:
+                        try:
+                            title_elem = row.find_element(By.CSS_SELECTOR, "a[data-testid='UnifiedJobTldLink']")
+                        except:
+                            pass
+
+                    if not title_elem:
+                        continue
+
+                    title = title_elem.text.strip()
+                    job_link = title_elem.get_attribute('href')
+
+                    if not title:
+                        continue
+
+                    # Nettoyer le titre
+                    clean_title = self._clean_job_title(title)
+
+                    # Date de publication
+                    date_str = ""
+                    date_formatted = ""
+                    try:
+                        date_elem = row.find_element(By.CSS_SELECTOR, "div[data-testid='job-created-date'] span[title]")
+                        date_title = date_elem.get_attribute('title')
+                        date_match = re.search(r'(\w+ \d+, \d+)', date_title)
+                        date_str = date_match.group(1) if date_match else ""
+                        date_formatted = self._format_date_fr(date_str)
+                    except:
+                        pass
+
+                    # Nombre de candidats
+                    total_candidates = 0
+                    try:
+                        candidates_elem = row.find_element(By.CSS_SELECTOR, "span[data-testid='candidates-pipeline-hosted-all-count']")
+                        total_candidates = int(candidates_elem.text)
+                    except:
+                        pass
+
+                    # Statut - essayer plusieurs sélecteurs
+                    status = "ACTIVE"  # Par défaut si on ne trouve pas
+                    try:
+                        # Essayer le sélecteur principal
+                        status_elem = row.find_element(By.CSS_SELECTOR, "div[data-testid='top-level-job-status']")
+                        status_text = status_elem.text.strip().lower()
+
+                        if 'ouvert' in status_text or 'open' in status_text:
+                            status = 'ACTIVE'
+                        elif 'suspendu' in status_text or 'pause' in status_text or 'paused' in status_text:
+                            status = 'PAUSED'
+                        elif 'fermé' in status_text or 'clos' in status_text or 'closed' in status_text:
+                            status = 'CLOSED'
+                    except:
+                        pass
+
+                    # Extraire l'employerJobId du lien
+                    employer_job_id = None
+                    if job_link and 'employerJobId=' in job_link:
+                        match = re.search(r'employerJobId=([^&]+)', job_link)
+                        if match:
+                            employer_job_id = unquote(match.group(1))
+
+                    jobs.append({
+                        'id': employer_job_id,
+                        'title': title,
+                        'title_clean': clean_title,
+                        'status': status,
+                        'date': date_formatted,
+                        'total_candidates': total_candidates,
+                        'job_link': job_link
+                    })
+
+                except:
+                    continue
+
+        except Exception as e:
+            print(f"❌ Erreur extraction jobs: {e}")
+
+        return jobs
+
+    def _has_next_page(self) -> bool:
+        """Vérifie si le bouton Suivant est actif"""
+        try:
+            next_btn = self.driver.find_element(By.ID, "ejsJobListPaginationNextBtn")
+            return not next_btn.get_attribute('disabled')
+        except:
+            return False
+
+    def _click_next_page(self) -> bool:
+        """Clique sur le bouton Suivant"""
+        try:
+            next_btn = self.driver.find_element(By.ID, "ejsJobListPaginationNextBtn")
+            if next_btn.get_attribute('disabled'):
+                return False
+
+            # Scroll vers le bouton et cliquer
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_btn)
+            time.sleep(0.5)
+            next_btn.click()
+            time.sleep(3)
+
+            # Attendre que le tableau soit rechargé
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "tr[data-testid='job-row']"))
+            )
+            return True
+        except Exception as e:
+            print(f"      Erreur pagination: {e}")
+        return False
+
+    def fetch_all_jobs(self) -> list:
+        """Fetch all jobs from HTML table with pagination"""
+        print("\nRecuperation de la liste des jobs...")
+
+        # Construire l'URL avec les filtres de statut
+        status_params = []
+        if 'ACTIVE' in self.job_statuses:
+            status_params.append('open')
+        if 'PAUSED' in self.job_statuses:
+            status_params.append('paused')
+        if 'CLOSED' in self.job_statuses:
+            status_params.append('closed')
+
+        status_str = ','.join(status_params)
+        jobs_url = f"https://employers.indeed.com/jobs?status={status_str}"
+
+        print(f"   URL: {jobs_url}")
+        self.driver.get(jobs_url)
+        time.sleep(4)
+
+        try:
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "tr[data-testid='job-row']"))
+            )
+        except:
+            print("Tableau des jobs non trouve")
+            return []
+
+        # Récupérer le nombre total affiché
+        try:
+            total_text = self.driver.find_element(By.CSS_SELECTOR, "span[data-testid='job-count'], .css-1f9ew9y").text
+            print(f"   Total affiche sur la page: {total_text}")
+        except:
+            pass
+
+        all_jobs = []
+        page = 1
+
+        while True:
+            print(f"   Page {page}...")
+
+            # Attendre que les lignes soient chargées
+            time.sleep(1)
+
+            jobs = self._extract_jobs_from_page()
+
+            # Ne pas filtrer par statut ici car l'URL filtre déjà
+            all_jobs.extend(jobs)
+
+            print(f"      {len(jobs)} jobs sur cette page (total: {len(all_jobs)})")
+
+            if self._has_next_page():
+                if not self._click_next_page():
+                    break
+                page += 1
+                time.sleep(1)  # Attendre le chargement
+            else:
+                break
+
+        print(f"\n{len(all_jobs)} jobs recuperes")
+
+        # Afficher la liste des jobs trouvés
+        print("\nListe des jobs:")
+        print("-" * 60)
+        for i, job in enumerate(all_jobs, 1):
+            status_icon = "[O]" if job['status'] == 'ACTIVE' else "[P]" if job['status'] == 'PAUSED' else "[F]"
+            print(f"   {i:3}. {status_icon} {job['title_clean']}")
+            if job['date']:
+                print(f"        Date: {job['date']} | Candidats: {job['total_candidates']}")
+        print("-" * 60)
+
+        return all_jobs
+
+    def _find_existing_job_folders(self, jobs: list) -> dict:
+        """Find which jobs already have folders in downloads"""
+        existing = {}
+        download_path = Path(self.download_folder)
+
+        if not download_path.exists():
+            return existing
+
+        # Get all folders with their info
+        folder_info = {}
+        for folder in download_path.iterdir():
+            if folder.is_dir():
+                # Format: "Nom du job (DD-MM-YYYY)"
+                match = re.match(r'(.+) \((\d{2}-\d{2}-\d{4})\)$', folder.name)
+                if match:
+                    job_name = match.group(1)
+                    date = match.group(2)
+                    clean_name = self._clean_job_title(job_name).lower()
+                    folder_info[folder.name] = {
+                        'clean_name': clean_name,
+                        'date': date,
+                        'cv_count': len(list(folder.glob('*.pdf')))
+                    }
+                else:
+                    clean_name = self._clean_job_title(folder.name).lower()
+                    folder_info[folder.name] = {
+                        'clean_name': clean_name,
+                        'date': None,
+                        'cv_count': len(list(folder.glob('*.pdf')))
+                    }
+
+        # Match jobs with folders
+        for job in jobs:
+            job_clean = job.get('title_clean', self._clean_job_title(job['title'])).lower()
+            job_date = job.get('date', '')
+
+            for folder_name, info in folder_info.items():
+                # Match by clean name and optionally date
+                if job_clean == info['clean_name']:
+                    # If dates match or no date filter
+                    if not info['date'] or not job_date or info['date'] == job_date:
+                        existing[job['id']] = {
+                            'title': job['title'],
+                            'folder': folder_name,
+                            'cv_count': info['cv_count'],
+                            'total_candidates': job.get('total_candidates', 0)
+                        }
+                        break
+
+        return existing
+
+    def _ask_skip_existing_jobs(self, jobs: list, existing_jobs: dict) -> list:
+        """Ask user which existing jobs to skip"""
+        if not existing_jobs:
+            return jobs
+
+        print("\n" + "=" * 60)
+        print("JOBS DEJA PRESENTS DANS LE DOSSIER DOWNLOADS:")
+        print("=" * 60)
+
+        jobs_with_new = []
+        jobs_complete = []
+
+        for job_id, info in existing_jobs.items():
+            cv_count = info['cv_count']
+            total = info['total_candidates']
+            title = info['title']
+
+            if total > cv_count:
+                jobs_with_new.append((job_id, info))
+                print(f"   [NEW] {title}")
+                print(f"         {cv_count} CVs telecharges / {total} candidats (+{total - cv_count} nouveaux)")
+            else:
+                jobs_complete.append((job_id, info))
+                print(f"   [OK]  {title} ({cv_count} CVs)")
+
+        print()
+        if jobs_with_new:
+            print(f"   {len(jobs_with_new)} jobs avec nouveaux candidats")
+        print(f"   {len(jobs_complete)} jobs complets")
+        print()
+        print("Options:")
+        print("   [S] SkipAll - Ignorer TOUS les jobs existants")
+        print("   [N] NewOnly - Telecharger seulement les jobs avec nouveaux candidats")
+        print("   [K] KeepAll - Telecharger quand meme tous les jobs")
+        print()
+
+        while True:
+            choice = input("Votre choix (S/N/K): ").strip().upper()
+
+            if choice == 'S':
+                # Skip all existing
+                jobs_to_skip = set(existing_jobs.keys())
+                filtered_jobs = [j for j in jobs if j['id'] not in jobs_to_skip]
+                print(f"\n{len(jobs_to_skip)} jobs ignores")
+                return filtered_jobs
+
+            elif choice == 'N':
+                # Only jobs with new candidates
+                jobs_to_skip = set(job_id for job_id, _ in jobs_complete)
+                filtered_jobs = [j for j in jobs if j['id'] not in jobs_to_skip]
+                print(f"\n{len(jobs_complete)} jobs complets ignores, {len(filtered_jobs)} a traiter")
+                return filtered_jobs
+
+            elif choice == 'K':
+                # Keep all
+                print("\nTous les jobs seront traites")
+                return jobs
+
+            print("Choix invalide, tapez S, N ou K")
+
+    def run_all_jobs(self):
+        """Process all jobs"""
+        jobs = self.fetch_all_jobs()
+
+        if not jobs:
+            print("Aucun job trouve")
+            return
+
+        # Filter completed jobs from checkpoint
+        jobs = [j for j in jobs if j['id'] not in self.checkpoint_data['completed_jobs']]
+
+        if not jobs:
+            print("Tous les jobs sont deja completes!")
+            return
+
+        # Check for existing folders
+        existing_jobs = self._find_existing_job_folders(jobs)
+
+        if existing_jobs:
+            jobs = self._ask_skip_existing_jobs(jobs, existing_jobs)
+
+        if not jobs:
+            print("Aucun job a traiter!")
+            return
+
+        print(f"\n{len(jobs)} jobs a traiter")
+        print("=" * 60)
+
+        for i, job in enumerate(jobs):
+            title_display = job.get('title_clean', job['title'])
+            print(f"\n[{i+1}/{len(jobs)}] {title_display}")
+            print(f"         Status: {job['status']}, Date: {job['date'] or 'N/A'}, Candidats: {job.get('total_candidates', '?')}")
+
+            self.current_job_id = job['id']
+            self.current_job_name = job['title']
+            self._create_job_folder(job['title'], job['date'])
+
+            if self.mode == 'backend':
+                self._download_all_candidates_api()
+            else:
+                # Navigate to job
+                self.driver.get(f"https://employers.indeed.com/candidates?selectedJobs={job['id']}")
+                time.sleep(3)
+                self._download_all_candidates_frontend()
+
+            self._save_checkpoint(job_id=job['id'])
+            print(f"   Job termine: {title_display}")
+
+    # ==================== MAIN ====================
+
+    def print_statistics(self):
+        """Print final statistics"""
+        print("\n" + "=" * 60)
+        print("📊 STATISTIQUES")
+        print("=" * 60)
+        print(f"Total traités:  {self.stats['total_processed']}")
+        print(f"✅ Téléchargés: {self.stats['downloaded']}")
+        print(f"⏭️ Ignorés:     {self.stats['skipped']}")
+        print(f"❌ Échecs:      {self.stats['failed']}")
+
+        if self.start_time:
+            elapsed = time.time() - self.start_time
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = int(elapsed % 60)
+            print(f"\n⏱️ Temps total: {hours}h {minutes}m {seconds}s")
+
+            if self.stats['downloaded'] > 0:
+                avg = elapsed / self.stats['downloaded']
+                print(f"⏱️ Moyenne/CV:  {avg:.1f}s")
+
+        print("=" * 60)
+
+    def run(self):
+        """Main execution"""
+        try:
+            self.show_menu()
+
+            if not self.setup_chrome():
+                return
+
+            self.start_time = time.time()
+
+            if self.job_mode == 'single':
+                if self.mode == 'backend':
+                    self.run_backend_single_job()
+                else:
+                    self.run_frontend_single_job()
+            else:
+                self.run_all_jobs()
+
+            self.print_statistics()
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Interrompu par l'utilisateur")
+            self.print_statistics()
+
+        except Exception as e:
+            print(f"\n❌ Erreur: {e}")
+            import traceback
+            traceback.print_exc()
+
+        finally:
+            if self.driver:
+                input("\nAppuyez sur Entrée pour fermer Chrome...")
+                self.driver.quit()
+
+
+def main():
+    downloader = IndeedDownloader()
+    downloader.run()
+
+
+if __name__ == "__main__":
+    main()
