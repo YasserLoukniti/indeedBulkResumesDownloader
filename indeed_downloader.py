@@ -319,7 +319,7 @@ class IndeedDownloader:
 
     # ==================== BACKEND MODE (API) ====================
 
-    def fetch_candidates_api(self, offset: int = 0, limit: int = 100):
+    def fetch_candidates_api(self, offset: int = 0, limit: int = 100, dispositions: list = None, sort_by: str = "APPLY_DATE", sort_order: str = "DESCENDING"):
         """Fetch candidates using GraphQL API via browser"""
         query = """query FindRCPMatches($input: OrchestrationMatchesInput!) {
   findRCPMatches(input: $input) {
@@ -343,6 +343,13 @@ class IndeedDownloader:
   }
 }"""
 
+        if dispositions is None:
+            dispositions = ["NEW", "PENDING", "PHONE_SCREENED", "INTERVIEWED", "OFFER_MADE", "REVIEWED"]
+
+        surface_context = [{"contextKey": "DISPOSITION", "contextPayload": d} for d in dispositions]
+        surface_context.append({"contextKey": "SORT_BY", "contextPayload": sort_by})
+        surface_context.append({"contextKey": "SORT_ORDER", "contextPayload": sort_order})
+
         variables = {
             "input": {
                 "clientSurfaceName": "candidate-list-page",
@@ -350,18 +357,9 @@ class IndeedDownloader:
                 "limit": limit,
                 "offset": offset,
                 "context": {
-                    "surfaceContext": [
-                        {"contextKey": "DISPOSITION", "contextPayload": "NEW"},
-                        {"contextKey": "DISPOSITION", "contextPayload": "PENDING"},
-                        {"contextKey": "DISPOSITION", "contextPayload": "PHONE_SCREENED"},
-                        {"contextKey": "DISPOSITION", "contextPayload": "INTERVIEWED"},
-                        {"contextKey": "DISPOSITION", "contextPayload": "OFFER_MADE"},
-                        {"contextKey": "DISPOSITION", "contextPayload": "REVIEWED"},
-                        {"contextKey": "SORT_BY", "contextPayload": "APPLY_DATE"},
-                        {"contextKey": "SORT_ORDER", "contextPayload": "DESCENDING"}
-                    ]
+                    "surfaceContext": surface_context
                 },
-                "searchSessionId": f"dl-{int(time.time())}"
+                "searchSessionId": f"dl-{int(time.time())}-{offset}"
             }
         }
 
@@ -554,19 +552,23 @@ class IndeedDownloader:
         with open(job_checkpoint_file, 'w', encoding='utf-8') as f:
             json.dump(job_data, f, ensure_ascii=False, indent=2)
 
-    def _download_all_candidates_api(self):
-        """Download all candidates via API"""
-        print("\nRecuperation des candidats via API...")
-
-        all_candidates = []
+    def _fetch_candidates_batch(self, dispositions: list, sort_by: str = "APPLY_DATE", sort_order: str = "DESCENDING") -> tuple:
+        """Fetch candidates with specific filters, returns (candidates_list, total_count)"""
+        all_candidates = {}  # Use dict to dedupe by legacy_id
         offset = 0
+        total_announced = 0
 
         while True:
-            print(f"   Fetching offset {offset}...")
-            matches, total = self.fetch_candidates_api(offset=offset, limit=100)
+            matches, total = self.fetch_candidates_api(
+                offset=offset,
+                limit=100,
+                dispositions=dispositions,
+                sort_by=sort_by,
+                sort_order=sort_order
+            )
 
             if offset == 0:
-                print(f"   Total: {total} candidats")
+                total_announced = total
 
             if not matches:
                 break
@@ -580,19 +582,92 @@ class IndeedDownloader:
                     resume = data.get('resume', {})
                     download_url = resume.get('downloadUrl') if resume else None
 
-                    if legacy_id and download_url:
-                        all_candidates.append({
+                    if legacy_id and download_url and legacy_id not in all_candidates:
+                        all_candidates[legacy_id] = {
                             'name': name,
                             'legacy_id': legacy_id,
                             'download_url': download_url
-                        })
+                        }
                 except:
                     continue
 
             if len(matches) < 100:
                 break
             offset += 100
-            time.sleep(0.5)
+            time.sleep(0.3)
+
+        return list(all_candidates.values()), total_announced
+
+    def _download_all_candidates_api(self):
+        """Download all candidates via API with multiple passes to bypass 3000 limit"""
+        print("\nRecuperation des candidats via API...")
+
+        # All disposition types
+        all_dispositions = ["NEW", "PENDING", "PHONE_SCREENED", "INTERVIEWED", "OFFER_MADE", "REVIEWED"]
+        all_candidates = {}
+        total_announced = 0
+
+        # Passe 1: Tri par date ASC
+        print("   Passe 1: Par date (ancien -> recent)...")
+        candidates, total_announced = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "ASCENDING")
+        for c in candidates:
+            all_candidates[c['legacy_id']] = c
+        print(f"      {len(candidates)} recuperes")
+
+        # Passe 2: Tri par date DESC
+        if len(all_candidates) < total_announced:
+            print("   Passe 2: Par date (recent -> ancien)...")
+            candidates, _ = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "DESCENDING")
+            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
+            for c in candidates:
+                if c['legacy_id'] not in all_candidates:
+                    all_candidates[c['legacy_id']] = c
+            print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
+
+        # Passe 3: Tri par nom ASC (si encore manquant)
+        if len(all_candidates) < total_announced:
+            print("   Passe 3: Par nom (A -> Z)...")
+            candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "ASCENDING")
+            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
+            for c in candidates:
+                if c['legacy_id'] not in all_candidates:
+                    all_candidates[c['legacy_id']] = c
+            print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
+
+        # Passe 4: Tri par nom DESC (si encore manquant)
+        if len(all_candidates) < total_announced:
+            print("   Passe 4: Par nom (Z -> A)...")
+            candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "DESCENDING")
+            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
+            for c in candidates:
+                if c['legacy_id'] not in all_candidates:
+                    all_candidates[c['legacy_id']] = c
+            print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
+
+        # Passe 5: Par statut individuel (si >8000 manquants)
+        if len(all_candidates) < total_announced and (total_announced - len(all_candidates)) > 1000:
+            print("   Passe 5: Par statut individuel...")
+            for disp in all_dispositions:
+                for sort_by in ["APPLY_DATE", "NAME"]:
+                    for sort_order in ["ASCENDING", "DESCENDING"]:
+                        candidates, _ = self._fetch_candidates_batch([disp], sort_by, sort_order)
+                        new_count = 0
+                        for c in candidates:
+                            if c['legacy_id'] not in all_candidates:
+                                all_candidates[c['legacy_id']] = c
+                                new_count += 1
+                        if new_count > 0:
+                            print(f"      {disp} ({sort_by} {sort_order}): +{new_count}")
+            print(f"      Total: {len(all_candidates)}")
+
+        all_candidates_list = list(all_candidates.values())
+
+        print(f"\n   Total annonce: {total_announced} | Recuperes: {len(all_candidates_list)}")
+
+        if len(all_candidates_list) < total_announced:
+            missing = total_announced - len(all_candidates_list)
+            pct = (len(all_candidates_list) / total_announced) * 100
+            print(f"   Note: {missing} candidats non recuperes ({pct:.1f}% recuperes)")
 
         # Load all downloaded IDs and names
         # Scan PDFs only for existing jobs (to detect already downloaded CVs)
@@ -600,7 +675,7 @@ class IndeedDownloader:
 
         # Filter already downloaded (by ID or by name)
         to_download = []
-        for c in all_candidates:
+        for c in all_candidates_list:
             # Check by legacy_id
             if c['legacy_id'] in downloaded_ids:
                 continue
@@ -611,8 +686,8 @@ class IndeedDownloader:
                     continue
             to_download.append(c)
 
-        already_done = len(all_candidates) - len(to_download)
-        print(f"\n   Total: {len(all_candidates)} | Deja telecharges: {already_done} | A telecharger: {len(to_download)}")
+        already_done = len(all_candidates_list) - len(to_download)
+        print(f"\n   A telecharger: {len(to_download)} (deja fait: {already_done})")
 
         if not to_download:
             print("   Tous les CVs sont deja telecharges!")
