@@ -1,6 +1,6 @@
 # Indeed CV Downloader
 
-**Version 2.2.0**
+**Version 2.3.0**
 
 Automated tool to bulk download resumes from Indeed Employer platform.
 
@@ -246,6 +246,16 @@ For issues or questions, open a GitHub issue with:
 ---
 
 ## Changelog
+
+### v2.3.0 (2025-11-27)
+
+**New Features:**
+- **Auto-close modals**: Automatically closes popups/modals when navigating to jobs
+- **Better folder matching**: Normalized comparison (removes accents, special chars) for matching job names with existing folders
+
+**Improvements:**
+- Partial name matching for existing folders (if one name contains the other)
+- Press ESC key to close any remaining modals
 
 ### v2.2.0 (2025-11-27)
 

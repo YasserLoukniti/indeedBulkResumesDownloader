@@ -306,6 +306,47 @@ class IndeedDownloader:
         self.current_job_folder = job_folder
         return job_folder
 
+    def _close_modals(self):
+        """Close any modal/popup that might be open"""
+        try:
+            # Common modal close selectors
+            close_selectors = [
+                "button[aria-label='Close']",
+                "button[aria-label='Fermer']",
+                "button[data-testid='modal-close']",
+                "button[data-testid='CloseButton']",
+                "[data-testid='modal-close-button']",
+                ".modal-close",
+                ".close-modal",
+                "button.css-1k9jcwk",  # Indeed's close button class
+                "[aria-label='close']",
+                "[aria-label='dismiss']",
+                "button[class*='close']",
+                "div[role='dialog'] button[type='button']",
+            ]
+
+            for selector in close_selectors:
+                try:
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for btn in buttons:
+                        if btn.is_displayed():
+                            btn.click()
+                            time.sleep(0.3)
+                except:
+                    continue
+
+            # Also try pressing Escape key
+            try:
+                from selenium.webdriver.common.keys import Keys
+                body = self.driver.find_element(By.TAG_NAME, "body")
+                body.send_keys(Keys.ESCAPE)
+                time.sleep(0.3)
+            except:
+                pass
+
+        except:
+            pass
+
     def _extract_job_id_from_url(self, url: str) -> Optional[str]:
         """Extract employerJobId from URL"""
         try:
@@ -1043,6 +1084,9 @@ class IndeedDownloader:
             print("Tableau des jobs non trouve")
             return []
 
+        # Close any modals that might appear
+        self._close_modals()
+
         # Récupérer le nombre total affiché
         try:
             total_text = self.driver.find_element(By.CSS_SELECTOR, "span[data-testid='job-count'], .css-1f9ew9y").text
@@ -1119,16 +1163,35 @@ class IndeedDownloader:
                         'cv_count': len(list(folder.glob('*.pdf')))
                     }
 
+        # Normalize function for comparison
+        def normalize(s):
+            # Remove accents, extra spaces, and normalize
+            import unicodedata
+            s = unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII')
+            s = re.sub(r'[^a-z0-9\s]', '', s.lower())
+            s = re.sub(r'\s+', ' ', s).strip()
+            return s
+
         # Match jobs with folders
         for job in jobs:
-            job_clean = job.get('title_clean', self._clean_job_title(job['title'])).lower()
+            job_clean = normalize(job.get('title_clean', self._clean_job_title(job['title'])))
             job_date = job.get('date', '')
 
             for folder_name, info in folder_info.items():
-                # Match by clean name and optionally date
-                if job_clean == info['clean_name']:
-                    # If dates match or no date filter
-                    if not info['date'] or not job_date or info['date'] == job_date:
+                folder_clean = normalize(info['clean_name'])
+
+                # Exact match
+                if job_clean == folder_clean:
+                    existing[job['id']] = {
+                        'title': job['title'],
+                        'folder': folder_name,
+                        'cv_count': info['cv_count'],
+                        'total_candidates': job.get('total_candidates', 0)
+                    }
+                    break
+                # Partial match (job name contains folder name or vice versa)
+                elif len(job_clean) >= 8 and len(folder_clean) >= 8:
+                    if job_clean in folder_clean or folder_clean in job_clean:
                         existing[job['id']] = {
                             'title': job['title'],
                             'folder': folder_name,
@@ -1237,11 +1300,15 @@ class IndeedDownloader:
             self._create_job_folder(job['title'], job['date'])
 
             if self.mode == 'backend':
+                # Close any modals that might appear
+                self._close_modals()
                 self._download_all_candidates_api()
             else:
                 # Navigate to job
                 self.driver.get(f"https://employers.indeed.com/candidates?selectedJobs={job['id']}")
                 time.sleep(3)
+                # Close any modals that might appear
+                self._close_modals()
                 self._download_all_candidates_frontend()
 
             self._save_checkpoint(job_id=job['id'])
