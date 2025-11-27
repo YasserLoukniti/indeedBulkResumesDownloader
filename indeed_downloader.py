@@ -1003,10 +1003,21 @@ class IndeedDownloader:
 
                     # Extraire l'employerJobId du lien
                     employer_job_id = None
-                    if job_link and 'employerJobId=' in job_link:
-                        match = re.search(r'employerJobId=([^&]+)', job_link)
-                        if match:
-                            employer_job_id = unquote(match.group(1))
+                    if job_link:
+                        # Try employerJobId first
+                        if 'employerJobId=' in job_link:
+                            match = re.search(r'employerJobId=([^&]+)', job_link)
+                            if match:
+                                employer_job_id = unquote(match.group(1))
+                        # Try id parameter
+                        elif 'id=' in job_link:
+                            match = re.search(r'[?&]id=([^&]+)', job_link)
+                            if match:
+                                employer_job_id = unquote(match.group(1))
+
+                    # If still no ID, create one from title + date
+                    if not employer_job_id:
+                        employer_job_id = f"{clean_title}_{date_formatted}".replace(' ', '_')
 
                     jobs.append({
                         'id': employer_job_id,
@@ -1168,27 +1179,34 @@ class IndeedDownloader:
                     job_name = match.group(1)
                     date = match.group(2)
                     clean_name = self._clean_job_title(job_name)
+                    normalized = normalize(clean_name)
+                    cv_count = len(list(folder.glob('*.pdf')))
                     folder_info[folder.name] = {
                         'original_name': job_name,
                         'clean_name': clean_name,
-                        'normalized_name': normalize(clean_name),
+                        'normalized_name': normalized,
                         'date': date,
-                        'cv_count': len(list(folder.glob('*.pdf'))),
+                        'cv_count': cv_count,
                         'matched_job_id': None  # Track which job matched this folder
                     }
                 else:
                     clean_name = self._clean_job_title(folder.name)
+                    normalized = normalize(clean_name)
+                    cv_count = len(list(folder.glob('*.pdf')))
                     folder_info[folder.name] = {
                         'original_name': folder.name,
                         'clean_name': clean_name,
-                        'normalized_name': normalize(clean_name),
+                        'normalized_name': normalized,
                         'date': None,
-                        'cv_count': len(list(folder.glob('*.pdf'))),
+                        'cv_count': cv_count,
                         'matched_job_id': None
                     }
 
+        print(f"\n   {len(folder_info)} dossiers trouves dans '{self.download_folder}/'")
+
         # Match jobs with folders - each folder can only match ONE job
         # First pass: match jobs that have exact name + date match (highest priority)
+        matched_count = 0
         for job in jobs:
             job_clean = job.get('title_clean', self._clean_job_title(job['title']))
             job_normalized = normalize(job_clean)
@@ -1217,7 +1235,10 @@ class IndeedDownloader:
                         'total_candidates': job.get('total_candidates', 0),
                         'date': job_date
                     }
+                    matched_count += 1
                     break
+
+        print(f"   {matched_count} dossiers correspondent a des jobs")
 
         # Second pass: for jobs without date match, try name-only match (only for folders without date)
         for job in jobs:
@@ -1350,21 +1371,27 @@ class IndeedDownloader:
 
     def run_all_jobs(self):
         """Process all jobs"""
-        jobs = self.fetch_all_jobs()
+        all_jobs = self.fetch_all_jobs()
 
-        if not jobs:
+        if not all_jobs:
             print("Aucun job trouve")
             return
 
-        # Filter completed jobs from checkpoint
-        jobs = [j for j in jobs if j['id'] not in self.checkpoint_data['completed_jobs']]
+        # Check for existing folders BEFORE filtering completed jobs
+        # This ensures we show all existing folders, even for completed jobs
+        existing_jobs = self._find_existing_job_folders(all_jobs)
 
-        if not jobs:
+        # Filter completed jobs from checkpoint
+        jobs = [j for j in all_jobs if j['id'] not in self.checkpoint_data['completed_jobs']]
+
+        # Show completed jobs count
+        completed_count = len(all_jobs) - len(jobs)
+        if completed_count > 0:
+            print(f"\n   ({completed_count} jobs deja completes dans le checkpoint, ignores)")
+
+        if not jobs and not existing_jobs:
             print("Tous les jobs sont deja completes!")
             return
-
-        # Check for existing folders
-        existing_jobs = self._find_existing_job_folders(jobs)
 
         if existing_jobs:
             jobs = self._ask_skip_existing_jobs(jobs, existing_jobs)
