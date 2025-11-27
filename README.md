@@ -250,12 +250,15 @@ For issues or questions, open a GitHub issue with:
 ### v2.5.0 (2025-11-27)
 
 **New Features:**
-- **Download report**: Generates `rapport_telechargement.txt` with summary of all jobs (CVs per job + global totals)
+- **Download report**: Generates `rapport_telechargement.txt` with detailed summary:
+  - Per-job stats: announced vs recovered candidates, archived/lost, downloaded, skipped, no CV
+  - Global totals with complete breakdown
 - **Job completion tracking**: Uses `stats.json` in each job folder to accurately track processed candidates
+- **Archived candidates handling**: Uses recovered count (not announced) for completion tracking - archived candidates by Indeed are ignored
 
 **Bug Fixes:**
 - Fixed job marked as `[NEW]` when already complete (now uses exact processed count instead of PDF count)
-- Fixed stats tracking for jobs >3000 candidates (uses actual job total, not API-recovered count)
+- Fixed infinite `[NEW]` loop for partially archived jobs (e.g., 680 recovered / 1656 announced → now marked as complete)
 
 ### v2.4.0 (2025-11-27)
 

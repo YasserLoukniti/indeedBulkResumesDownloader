@@ -803,17 +803,21 @@ class IndeedDownloader:
 
         print(f"\n   A telecharger: {len(candidates_with_cv)} | Deja fait: {already_processed} | Sans CV: {len(candidates_no_cv)}")
 
+        # Use recovered count (not announced) - some candidates may be archived by Indeed
+        total_recovered = len(all_candidates_list)
+
         if not candidates_with_cv:
             print("   Tous les CVs sont deja telecharges!")
-            # Save stats to mark job as complete (use total_expected, not len(all_candidates_list))
-            self._save_job_stats(total_expected, already_processed + len(candidates_no_cv))
+            # Save stats with recovered count (what API actually returned)
+            self._save_job_stats(total_recovered, already_processed + len(candidates_no_cv))
             # Track job stats for report
             self.job_stats.append({
                 'job_name': self.current_job_name,
                 'downloaded': 0,
                 'skipped': already_processed,
                 'no_cv': len(candidates_no_cv),
-                'total': total_expected
+                'total_announced': total_expected,
+                'total_recovered': total_recovered
             })
             return
 
@@ -826,9 +830,9 @@ class IndeedDownloader:
                     downloaded_count += 1
                 pbar.update(1)
 
-        # Save stats after downloading (use total_expected for jobs >3000)
+        # Save stats with recovered count (what API actually returned)
         total_processed = already_processed + len(candidates_no_cv) + downloaded_count
-        self._save_job_stats(total_expected, total_processed)
+        self._save_job_stats(total_recovered, total_processed)
 
         # Track job stats for report
         self.job_stats.append({
@@ -836,7 +840,8 @@ class IndeedDownloader:
             'downloaded': downloaded_count,
             'skipped': already_processed,
             'no_cv': len(candidates_no_cv),
-            'total': total_expected
+            'total_announced': total_expected,
+            'total_recovered': total_recovered
         })
 
     # ==================== FRONTEND MODE (Selenium) ====================
@@ -1610,7 +1615,9 @@ class IndeedDownloader:
         total_downloaded = sum(j['downloaded'] for j in self.job_stats)
         total_skipped = sum(j['skipped'] for j in self.job_stats)
         total_no_cv = sum(j['no_cv'] for j in self.job_stats)
-        total_candidates = sum(j['total'] for j in self.job_stats)
+        total_announced = sum(j['total_announced'] for j in self.job_stats)
+        total_recovered = sum(j['total_recovered'] for j in self.job_stats)
+        total_archived = total_announced - total_recovered
 
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("=" * 70 + "\n")
@@ -1627,7 +1634,11 @@ class IndeedDownloader:
 
             for i, job in enumerate(self.job_stats, 1):
                 f.write(f"{i}. {job['job_name']}\n")
-                f.write(f"   Candidats total:    {job['total']}\n")
+                f.write(f"   Candidats annonces: {job['total_announced']}\n")
+                f.write(f"   Candidats recuperes:{job['total_recovered']}\n")
+                archived = job['total_announced'] - job['total_recovered']
+                if archived > 0:
+                    f.write(f"   Archives/perdus:    {archived}\n")
                 f.write(f"   CVs telecharges:    {job['downloaded']}\n")
                 f.write(f"   Deja telecharges:   {job['skipped']}\n")
                 f.write(f"   Sans CV:            {job['no_cv']}\n")
@@ -1637,7 +1648,10 @@ class IndeedDownloader:
             f.write("-" * 70 + "\n")
             f.write("RESUME GLOBAL\n")
             f.write("-" * 70 + "\n")
-            f.write(f"Total candidats:       {total_candidates}\n")
+            f.write(f"Candidats annonces:    {total_announced}\n")
+            f.write(f"Candidats recuperes:   {total_recovered}\n")
+            if total_archived > 0:
+                f.write(f"Archives/perdus:       {total_archived}\n")
             f.write(f"CVs telecharges:       {total_downloaded}\n")
             f.write(f"Deja telecharges:      {total_skipped}\n")
             f.write(f"Sans CV:               {total_no_cv}\n")
