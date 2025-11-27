@@ -645,61 +645,71 @@ class IndeedDownloader:
 
         # All disposition types
         all_dispositions = ["NEW", "PENDING", "PHONE_SCREENED", "INTERVIEWED", "OFFER_MADE", "REVIEWED"]
-        all_candidates = {}
+        all_candidates = {}  # key: legacy_id, value: candidate dict
         total_announced = 0
 
-        # Passe 1: Tri par date ASC
-        print("   Passe 1: Par date (ancien -> recent)...")
-        candidates, total_announced = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "ASCENDING")
+        # Passe 1: Tri par date DESC (défaut)
+        print("   Recuperation des candidats...")
+        candidates, total_announced = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "DESCENDING")
         for c in candidates:
-            all_candidates[c['legacy_id']] = c
-        print(f"      {len(candidates)} recuperes")
+            if c['legacy_id'] not in all_candidates:
+                all_candidates[c['legacy_id']] = c
+        print(f"      {len(all_candidates)} recuperes")
 
-        # Passe 2: Tri par date DESC
-        if len(all_candidates) < total_announced:
-            print("   Passe 2: Par date (recent -> ancien)...")
-            candidates, _ = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "DESCENDING")
-            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
+        # Si on a tout récupéré ou si <= 3000 annoncés, pas besoin de passes supplémentaires
+        if len(all_candidates) >= total_announced or total_announced <= 3000:
+            pass  # On a tout, pas besoin de passes supplémentaires
+        else:
+            # Passes supplémentaires pour dépasser la limite de 3000
+            print(f"   Limite API atteinte ({len(all_candidates)}/{total_announced}), passes supplementaires...")
+
+            # Passe 2: Tri par date ASC
+            print("   Passe 2: Par date (ancien -> recent)...")
+            candidates, _ = self._fetch_candidates_batch(all_dispositions, "APPLY_DATE", "ASCENDING")
+            new_count = 0
             for c in candidates:
                 if c['legacy_id'] not in all_candidates:
                     all_candidates[c['legacy_id']] = c
+                    new_count += 1
             print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
-        # Passe 3: Tri par nom ASC (si encore manquant)
-        if len(all_candidates) < total_announced:
-            print("   Passe 3: Par nom (A -> Z)...")
-            candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "ASCENDING")
-            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
-            for c in candidates:
-                if c['legacy_id'] not in all_candidates:
-                    all_candidates[c['legacy_id']] = c
-            print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
+            # Passe 3: Tri par nom ASC (si encore manquant)
+            if len(all_candidates) < total_announced:
+                print("   Passe 3: Par nom (A -> Z)...")
+                candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "ASCENDING")
+                new_count = 0
+                for c in candidates:
+                    if c['legacy_id'] not in all_candidates:
+                        all_candidates[c['legacy_id']] = c
+                        new_count += 1
+                print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
-        # Passe 4: Tri par nom DESC (si encore manquant)
-        if len(all_candidates) < total_announced:
-            print("   Passe 4: Par nom (Z -> A)...")
-            candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "DESCENDING")
-            new_count = sum(1 for c in candidates if c['legacy_id'] not in all_candidates)
-            for c in candidates:
-                if c['legacy_id'] not in all_candidates:
-                    all_candidates[c['legacy_id']] = c
-            print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
+            # Passe 4: Tri par nom DESC (si encore manquant)
+            if len(all_candidates) < total_announced:
+                print("   Passe 4: Par nom (Z -> A)...")
+                candidates, _ = self._fetch_candidates_batch(all_dispositions, "NAME", "DESCENDING")
+                new_count = 0
+                for c in candidates:
+                    if c['legacy_id'] not in all_candidates:
+                        all_candidates[c['legacy_id']] = c
+                        new_count += 1
+                print(f"      +{new_count} nouveaux, total: {len(all_candidates)}")
 
-        # Passe 5: Par statut individuel (si >8000 manquants)
-        if len(all_candidates) < total_announced and (total_announced - len(all_candidates)) > 1000:
-            print("   Passe 5: Par statut individuel...")
-            for disp in all_dispositions:
-                for sort_by in ["APPLY_DATE", "NAME"]:
-                    for sort_order in ["ASCENDING", "DESCENDING"]:
-                        candidates, _ = self._fetch_candidates_batch([disp], sort_by, sort_order)
-                        new_count = 0
-                        for c in candidates:
-                            if c['legacy_id'] not in all_candidates:
-                                all_candidates[c['legacy_id']] = c
-                                new_count += 1
-                        if new_count > 0:
-                            print(f"      {disp} ({sort_by} {sort_order}): +{new_count}")
-            print(f"      Total: {len(all_candidates)}")
+            # Passe 5: Par statut individuel (si >1000 manquants)
+            if len(all_candidates) < total_announced and (total_announced - len(all_candidates)) > 1000:
+                print("   Passe 5: Par statut individuel...")
+                for disp in all_dispositions:
+                    for sort_by in ["APPLY_DATE", "NAME"]:
+                        for sort_order in ["ASCENDING", "DESCENDING"]:
+                            candidates, _ = self._fetch_candidates_batch([disp], sort_by, sort_order)
+                            new_count = 0
+                            for c in candidates:
+                                if c['legacy_id'] not in all_candidates:
+                                    all_candidates[c['legacy_id']] = c
+                                    new_count += 1
+                            if new_count > 0:
+                                print(f"      {disp} ({sort_by} {sort_order}): +{new_count}")
+                print(f"      Total: {len(all_candidates)}")
 
         all_candidates_list = list(all_candidates.values())
 
@@ -710,21 +720,27 @@ class IndeedDownloader:
             pct = (len(all_candidates_list) / total_announced) * 100
             print(f"   Note: {missing} candidats non recuperes ({pct:.1f}% recuperes)")
 
-        # Load all downloaded IDs and names
-        # Scan PDFs only for existing jobs (to detect already downloaded CVs)
-        downloaded_ids, downloaded_names = self._load_job_checkpoint(scan_pdfs=self.current_job_is_existing)
+        # Load downloaded names by scanning existing PDF files
+        # This is the only reliable way to know what's already downloaded
+        downloaded_names = set()
+        if self.current_job_folder and self.current_job_folder.exists():
+            for pdf_file in self.current_job_folder.glob('*.pdf'):
+                # Format: "Jean Dupont_20251126_154317.pdf"
+                name_part = pdf_file.stem.rsplit('_', 2)[0]  # Get "Jean Dupont"
+                if name_part:
+                    # Normalize name for comparison
+                    clean_name = "".join(ch for ch in name_part if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
+                    downloaded_names.add(clean_name)
+            if downloaded_names:
+                print(f"   {len(downloaded_names)} CVs deja presents dans le dossier")
 
-        # Filter already downloaded (by ID or by name)
+        # Filter already downloaded (by name)
         to_download = []
         for c in all_candidates_list:
-            # Check by legacy_id
-            if c['legacy_id'] in downloaded_ids:
+            # Clean candidate name for comparison
+            clean_name = "".join(ch for ch in c['name'] if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
+            if clean_name in downloaded_names:
                 continue
-            # Check by name (cleaned and lowercased) - only if we have names from scan
-            if downloaded_names:
-                clean_name = "".join(ch for ch in c['name'] if ch.isalnum() or ch in (' ', '-', '_')).strip().lower()
-                if clean_name in downloaded_names:
-                    continue
             to_download.append(c)
 
         already_done = len(all_candidates_list) - len(to_download)

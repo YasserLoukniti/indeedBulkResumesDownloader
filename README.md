@@ -1,6 +1,6 @@
 # Indeed CV Downloader
 
-**Version 2.3.2**
+**Version 2.3.3**
 
 Automated tool to bulk download resumes from Indeed Employer platform.
 
@@ -246,6 +246,14 @@ For issues or questions, open a GitHub issue with:
 ---
 
 ## Changelog
+
+### v2.3.3 (2025-11-27)
+
+**Improvements:**
+- **Name-based duplicate detection**: Now compares by candidate name (from PDF filenames) instead of relying on checkpoint
+- **Multi-pass only when needed**: Additional API passes (date ASC/DESC, name A-Z/Z-A) only run when >3000 candidates
+- **Simpler logic**: PDF filenames are the single source of truth for already downloaded CVs
+- Shows count of existing CVs found in folder before downloading
 
 ### v2.3.2 (2025-11-27)
 
