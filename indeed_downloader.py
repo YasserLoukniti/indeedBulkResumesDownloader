@@ -289,13 +289,20 @@ class IndeedDownloader:
         title = title.strip()
         return title
 
-    def _save_job_stats(self, total_candidates: int, processed: int):
-        """Save job statistics to stats.json in job folder"""
+    def _save_job_stats(self, total_announced: int, total_recovered: int, processed: int):
+        """Save job statistics to stats.json in job folder
+
+        Args:
+            total_announced: Number of candidates shown in job listing
+            total_recovered: Number of candidates returned by API
+            processed: Number of candidates actually processed (CVs + no_cv)
+        """
         if not self.current_job_folder:
             return
         stats_file = self.current_job_folder / 'stats.json'
         stats = {
-            'total_candidates': total_candidates,
+            'total_announced': total_announced,
+            'total_recovered': total_recovered,
             'processed': processed
         }
         with open(stats_file, 'w', encoding='utf-8') as f:
@@ -808,8 +815,8 @@ class IndeedDownloader:
 
         if not candidates_with_cv:
             print("   Tous les CVs sont deja telecharges!")
-            # Save stats with recovered count (what API actually returned)
-            self._save_job_stats(total_recovered, already_processed + len(candidates_no_cv))
+            # Save stats: announced, recovered, processed
+            self._save_job_stats(total_expected, total_recovered, already_processed + len(candidates_no_cv))
             # Track job stats for report
             self.job_stats.append({
                 'job_name': self.current_job_name,
@@ -830,9 +837,9 @@ class IndeedDownloader:
                     downloaded_count += 1
                 pbar.update(1)
 
-        # Save stats with recovered count (what API actually returned)
+        # Save stats: announced, recovered, processed
         total_processed = already_processed + len(candidates_no_cv) + downloaded_count
-        self._save_job_stats(total_recovered, total_processed)
+        self._save_job_stats(total_expected, total_recovered, total_processed)
 
         # Track job stats for report
         self.job_stats.append({
@@ -1285,6 +1292,7 @@ class IndeedDownloader:
                     stats = self._load_job_stats(folder)
                     if stats:
                         cv_count = stats.get('processed', 0)
+                        total_recovered = stats.get('total_recovered', cv_count)
                     else:
                         # Fallback: count PDFs + no_cv.txt entries
                         cv_count = len(list(folder.glob('*.pdf')))
@@ -1292,12 +1300,14 @@ class IndeedDownloader:
                         if no_cv_file.exists():
                             with open(no_cv_file, 'r', encoding='utf-8') as f:
                                 cv_count += sum(1 for line in f if line.strip())
+                        total_recovered = cv_count  # No stats, assume all processed
                     folder_info[folder.name] = {
                         'original_name': job_name,
                         'clean_name': clean_name,
                         'normalized_name': normalized,
                         'date': date,
                         'cv_count': cv_count,
+                        'total_recovered': total_recovered,
                         'matched_job_id': None  # Track which job matched this folder
                     }
                 else:
@@ -1307,6 +1317,7 @@ class IndeedDownloader:
                     stats = self._load_job_stats(folder)
                     if stats:
                         cv_count = stats.get('processed', 0)
+                        total_recovered = stats.get('total_recovered', cv_count)
                     else:
                         # Fallback: count PDFs + no_cv.txt entries
                         cv_count = len(list(folder.glob('*.pdf')))
@@ -1314,12 +1325,14 @@ class IndeedDownloader:
                         if no_cv_file.exists():
                             with open(no_cv_file, 'r', encoding='utf-8') as f:
                                 cv_count += sum(1 for line in f if line.strip())
+                        total_recovered = cv_count  # No stats, assume all processed
                     folder_info[folder.name] = {
                         'original_name': folder.name,
                         'clean_name': clean_name,
                         'normalized_name': normalized,
                         'date': None,
                         'cv_count': cv_count,
+                        'total_recovered': total_recovered,
                         'matched_job_id': None
                     }
 
@@ -1353,6 +1366,7 @@ class IndeedDownloader:
                         'title_clean': job_clean,
                         'folder': folder_name,
                         'cv_count': info['cv_count'],
+                        'total_recovered': info['total_recovered'],
                         'total_candidates': job.get('total_candidates', 0),
                         'date': job_date
                     }
@@ -1417,6 +1431,7 @@ class IndeedDownloader:
                     'title_clean': job_clean,
                     'folder': best_match,
                     'cv_count': folder_info[best_match]['cv_count'],
+                    'total_recovered': folder_info[best_match]['total_recovered'],
                     'total_candidates': job.get('total_candidates', 0),
                     'date': job_date
                 }
@@ -1441,8 +1456,9 @@ class IndeedDownloader:
         jobs_complete = []
 
         for job_id, info in existing_jobs.items():
-            cv_count = info['cv_count']
-            total = info['total_candidates']
+            cv_count = info['cv_count']  # processed
+            total_recovered = info.get('total_recovered', cv_count)  # what API returned
+            total_announced = info['total_candidates']  # what job listing shows
             # Use cleaned title for display
             title = info.get('title_clean', info['title'])
             folder = info['folder']
@@ -1451,14 +1467,19 @@ class IndeedDownloader:
             # Format title with date for clarity
             title_with_date = f"{title} ({date})" if date else title
 
-            if cv_count < total:
+            # Compare with total_recovered (not total_announced) to determine completion
+            if cv_count < total_recovered:
                 jobs_with_new.append((job_id, info))
                 print(f"   [NEW] {title_with_date}")
                 print(f"         Dossier: {folder}")
-                print(f"         {cv_count} traites / {total} candidats (+{total - cv_count} nouveaux)")
+                print(f"         {cv_count} traites / {total_recovered} recuperes (+{total_recovered - cv_count} restants)")
             else:
                 jobs_complete.append((job_id, info))
-                print(f"   [OK]  {title_with_date} ({cv_count}/{total})")
+                # Show both recovered and announced if different
+                if total_recovered < total_announced:
+                    print(f"   [OK]  {title_with_date} ({cv_count}/{total_recovered} recuperes, {total_announced} annonces)")
+                else:
+                    print(f"   [OK]  {title_with_date} ({cv_count}/{total_announced})")
 
         print()
         if jobs_with_new:
@@ -1604,27 +1625,53 @@ class IndeedDownloader:
         self._generate_report()
 
     def _generate_report(self):
-        """Generate a summary report file"""
-        if not self.job_stats:
-            return
-
+        """Generate a summary report file by scanning all job folders in downloads"""
         report_file = Path(self.download_folder) / 'rapport_telechargement.txt'
         timestamp = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
+        # Scan all job folders in downloads
+        download_path = Path(self.download_folder)
+        job_folders = []
+
+        for folder in sorted(download_path.iterdir()):
+            if folder.is_dir():
+                # Count PDFs
+                pdf_count = len(list(folder.glob('*.pdf')))
+
+                # Count no_cv.txt entries
+                no_cv_count = 0
+                no_cv_file = folder / 'no_cv.txt'
+                if no_cv_file.exists():
+                    with open(no_cv_file, 'r', encoding='utf-8') as f:
+                        no_cv_count = sum(1 for line in f if line.strip())
+
+                # Load stats.json if exists
+                stats = self._load_job_stats(folder)
+
+                job_folders.append({
+                    'name': folder.name,
+                    'pdf_count': pdf_count,
+                    'no_cv_count': no_cv_count,
+                    'stats': stats
+                })
+
+        if not job_folders:
+            print("Aucun dossier job trouve dans downloads/")
+            return
+
         # Calculate totals
-        total_downloaded = sum(j['downloaded'] for j in self.job_stats)
-        total_skipped = sum(j['skipped'] for j in self.job_stats)
-        total_no_cv = sum(j['no_cv'] for j in self.job_stats)
-        total_announced = sum(j['total_announced'] for j in self.job_stats)
-        total_recovered = sum(j['total_recovered'] for j in self.job_stats)
+        total_pdfs = sum(j['pdf_count'] for j in job_folders)
+        total_no_cv = sum(j['no_cv_count'] for j in job_folders)
+        total_announced = sum(j['stats'].get('total_announced', 0) if j['stats'] else 0 for j in job_folders)
+        total_recovered = sum(j['stats'].get('total_recovered', 0) if j['stats'] else 0 for j in job_folders)
         total_archived = total_announced - total_recovered
 
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("=" * 70 + "\n")
-            f.write("RAPPORT DE TELECHARGEMENT - INDEED CV DOWNLOADER\n")
+            f.write("RAPPORT GLOBAL - INDEED CV DOWNLOADER\n")
             f.write("=" * 70 + "\n")
             f.write(f"Date: {timestamp}\n")
-            f.write(f"Jobs traites: {len(self.job_stats)}\n")
+            f.write(f"Dossiers job: {len(job_folders)}\n")
             f.write("\n")
 
             # Per-job stats
@@ -1632,30 +1679,32 @@ class IndeedDownloader:
             f.write("DETAIL PAR JOB\n")
             f.write("-" * 70 + "\n\n")
 
-            for i, job in enumerate(self.job_stats, 1):
-                f.write(f"{i}. {job['job_name']}\n")
-                f.write(f"   Candidats annonces: {job['total_announced']}\n")
-                f.write(f"   Candidats recuperes:{job['total_recovered']}\n")
-                archived = job['total_announced'] - job['total_recovered']
-                if archived > 0:
-                    f.write(f"   Archives/perdus:    {archived}\n")
-                f.write(f"   CVs telecharges:    {job['downloaded']}\n")
-                f.write(f"   Deja telecharges:   {job['skipped']}\n")
-                f.write(f"   Sans CV:            {job['no_cv']}\n")
+            for i, job in enumerate(job_folders, 1):
+                f.write(f"{i}. {job['name']}\n")
+                if job['stats']:
+                    announced = job['stats'].get('total_announced', 0)
+                    recovered = job['stats'].get('total_recovered', 0)
+                    archived = announced - recovered
+                    f.write(f"   Candidats annonces: {announced}\n")
+                    f.write(f"   Candidats recuperes:{recovered}\n")
+                    if archived > 0:
+                        f.write(f"   Archives/perdus:    {archived}\n")
+                f.write(f"   CVs telecharges:    {job['pdf_count']}\n")
+                if job['no_cv_count'] > 0:
+                    f.write(f"   Sans CV:            {job['no_cv_count']}\n")
                 f.write("\n")
 
             # Summary
             f.write("-" * 70 + "\n")
             f.write("RESUME GLOBAL\n")
             f.write("-" * 70 + "\n")
+            f.write(f"Total jobs:            {len(job_folders)}\n")
             f.write(f"Candidats annonces:    {total_announced}\n")
             f.write(f"Candidats recuperes:   {total_recovered}\n")
             if total_archived > 0:
                 f.write(f"Archives/perdus:       {total_archived}\n")
-            f.write(f"CVs telecharges:       {total_downloaded}\n")
-            f.write(f"Deja telecharges:      {total_skipped}\n")
+            f.write(f"CVs telecharges:       {total_pdfs}\n")
             f.write(f"Sans CV:               {total_no_cv}\n")
-            f.write(f"Total CVs en stock:    {total_downloaded + total_skipped}\n")
             f.write("=" * 70 + "\n")
 
         print(f"\nRapport genere: {report_file}")
