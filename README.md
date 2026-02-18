@@ -1,52 +1,42 @@
 # Indeed CV Downloader
 
-**Version 2.5.0**
+![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python&logoColor=white)
+![Selenium](https://img.shields.io/badge/Selenium-4.16-green?logo=selenium&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-Automated tool to bulk download resumes from Indeed Employer platform.
+**Version 3.0.0**
 
-## Features
+Bulk download all candidate resumes from your Indeed Employer dashboard in one click. No extension, no manual export — just run and go.
 
-### Core Features
-- Automatic bulk CV/resume download
-- Session-based authentication (no credentials needed)
-- Smart resume on interruption with checkpoint system
-- **Smart skip**: Automatically skips already downloaded candidates
-- Progress tracking with real-time statistics
-- Configurable delays and parameters
-- Automatic file naming with candidate names
-- Bilingual support (English / French)
+## How It Works
 
-### Multi-Job Manager (v2.1)
-- **All jobs at once**: Fetch and process all jobs from Indeed Employer dashboard
-- **HTML table parsing**: Reliable extraction via pagination buttons
-- **Smart comparison**: Compare jobs with existing download folders
-- **New candidates detection**: Only download new CVs since last run
-- **Clean folder names**: Removes H/F variants, replaces `/` with `-`
-- **Status filter**: Filter by Open, Paused, or Closed jobs
-- **Backend/Frontend modes**: API (fast) or Selenium (stable)
+1. **Run the script** (or the `.exe`)
+2. **Log in** to your Indeed Employer account in the Chrome window that opens
+3. **Choose your options** (download mode, which jobs, status filter)
+4. **Let it run** — resumes are downloaded as PDFs, organized by job folder
 
-## Prerequisites
+That's it. On the next run, your session is remembered and already-downloaded CVs are skipped.
 
-- Google Chrome browser
-- Indeed Employer account with access to candidates
-- Active Indeed Employer session
+## Privacy & Security
 
-## Standalone Executables (No Python Required)
+- **100% local** — All data stays on your machine. Nothing is sent to any external server.
+- **No credentials stored** — The script never sees or saves your password. You log in yourself in Chrome.
+- **Session cookies only** — Saved locally in `logs/indeed_cookies.json` to avoid re-login. They expire after ~24h.
+- **Open source** — You can read every line of code. No telemetry, no analytics, no tracking.
 
-Pre-built executables are available in the `dist/` folder:
+## Standalone Executable (No Python Required)
 
-| File                     | Description                 |
-| ------------------------ | --------------------------- |
-| `IndeedCVDownloader.exe` | Main downloader application |
-| `ConvertCookies.exe`     | Cookie format converter     |
+A pre-built executable is available in the `dist/` folder — just download and run, no Python needed.
 
-### Quick Start (Executable)
+### Quick Start
 
-1. Export your cookies from Chrome (see "Export your Indeed cookies" below)
-2. Save the file as `logs/indeed_cookies.txt`
-3. Run `ConvertCookies.exe` to convert to JSON format
-4. Run `IndeedCVDownloader.exe`
-5. Choose your options in the menu
+1. Download `IndeedCVDownloader.exe` from the `dist/` folder
+2. Double-click to run
+3. Log in to your Indeed Employer account in the Chrome window that opens
+4. Choose your options in the menu and start downloading!
+
+> No Python, no extension, no configuration needed.
 
 ## Installation (Python)
 
@@ -63,66 +53,69 @@ cd indeed-cv-downloader
 pip install -r requirements.txt
 ```
 
-### 3. Export your Indeed cookies
-
-**Method 1: Using Browser Extension (Recommended)**
-
-1. Install "Get cookies.txt" Chrome extension
-2. Navigate to `https://employers.indeed.com/candidates`
-3. Click the extension icon and export cookies
-4. Save as `logs/indeed_cookies.txt`
-
-**Method 2: Using Console**
-
-1. Open Indeed Employer in Chrome
-2. Press F12 → Console tab
-3. Paste and run the export script (see GUIDE_COOKIES.md)
-4. Save output to a file
-
-### 4. Convert cookies to JSON
-
-```bash
-python convert_cookies.py
-```
-
-This will read `logs/indeed_cookies.txt` and create `logs/indeed_cookies.json`.
-
-## Usage
-
-### Run the main script
+### 3. Run
 
 ```bash
 python indeed_downloader.py
 ```
 
-### Menu Options
+### 4. (Optional) Custom configuration
 
-1. **Download Mode**:
-   - `Backend (API)` - Faster, parallel downloads via GraphQL
-   - `Frontend (Selenium)` - More stable, simulates clicks
+```bash
+cp .env.example .env.config
+```
 
-2. **Job Selection**:
-   - `Single job` - Navigate to a specific job manually
-   - `All jobs` - Process all jobs automatically
+## Features
 
-3. **Status Filter** (for All jobs mode):
-   - Open only
-   - Paused only
-   - Closed only
-   - Open + Paused
-   - All statuses
+### Authentication
+- **Automatic**: Chrome opens, you log in once, cookies are captured and reused
+- **Session persistence**: Saved cookies are validated on each run — no re-login until they expire
+- **Expiry detection**: If cookies are invalid, the script asks you to log in again
 
-### Example Output
+### Download Modes
+- **Backend (API)** — Fast parallel downloads via Indeed's GraphQL API
+- **Frontend (Selenium)** — Slower but more stable, simulates real browser clicks
+
+### Job Selection
+- **Single job** — Navigate to a specific job, press Enter
+- **All jobs** — Automatically fetches and processes every job from your dashboard
+
+### Smart Features
+- **Resume on interruption** — Checkpoint system lets you stop and restart without losing progress
+- **Duplicate detection** — Already downloaded CVs are skipped (by name and ID)
+- **New candidates only** — On re-run, only downloads CVs added since last time
+- **Folder matching** — Matches existing download folders to jobs by name and date
+- **Status filter** — Filter jobs by Open, Paused, or Closed
+- **Old job filter** — Jobs older than 2 years are skipped (Indeed archives data)
+- **Multi-pass fetch** — Bypasses Indeed's 3000 candidate limit using multiple sort strategies
+- **Report generation** — Creates `rapport_telechargement.txt` with stats per job
+
+## Menu Walkthrough
 
 ```
-Recuperation de la liste des jobs...
-   URL: https://employers.indeed.com/jobs?status=open,paused,closed
-   Page 1...
-      25 jobs sur cette page (total: 25)
-   Page 2...
-      25 jobs sur cette page (total: 50)
-   ...
+╔════════════════════════════════════════════════════════════╗
+║         Indeed CV Downloader - Version Unifiee             ║
+╚════════════════════════════════════════════════════════════╝
 
+MODE DE TELECHARGEMENT:
+   1. Backend (API) - Plus rapide, telechargements paralleles
+   2. Frontend (Selenium) - Plus stable, clics simules
+
+MODE DE SELECTION DES JOBS:
+   1. Job unique - Vous naviguez vers le job souhaite
+   2. Tous les jobs - Parcourt automatiquement tous les jobs
+
+STATUT DES ANNONCES A TRAITER:
+   1. Ouvertes uniquement
+   2. Suspendues uniquement
+   3. Fermees uniquement
+   4. Ouvertes + Suspendues
+   5. Toutes
+```
+
+### Example: All Jobs Mode
+
+```
 145 jobs recuperes
 
 Liste des jobs:
@@ -138,8 +131,8 @@ Liste des jobs:
 JOBS DEJA PRESENTS DANS LE DOSSIER DOWNLOADS:
 ============================================================
    [NEW] Data Scientist
-         450 CVs telecharges / 550 candidats (+100 nouveaux)
-   [OK]  Marketing Manager (120 CVs)
+         450 traites / 550 recuperes (+100 restants)
+   [OK]  Marketing Manager (120/120)
 
 Options:
    [S] SkipAll - Ignorer TOUS les jobs existants
@@ -154,72 +147,48 @@ Edit `.env.config` to customize parameters:
 ```bash
 # Download speeds
 DOWNLOAD_DELAY=0.5              # Delay after clicking download button
-NEXT_CANDIDATE_DELAY=1.0        # Delay after navigating to next candidate
+NEXT_CANDIDATE_DELAY=1.0        # Delay between candidates
 
-# Download limit
-MAX_CVS=3000                    # Number of CVs to download per job
+# Download settings
+MAX_CVS=3000                    # Max CVs to download per job
+PARALLEL_DOWNLOADS=10           # Parallel downloads (backend mode)
 
 # Directories
-DOWNLOAD_FOLDER=downloads       # CV download directory
-LOG_FOLDER=logs                 # Logs and checkpoints directory
-```
-
-## Resume from Interruption
-
-If the script stops (Ctrl+C, error, or internet issue):
-
-1. Simply re-run the script
-2. It automatically resumes from the last checkpoint
-3. Already downloaded CVs are skipped
-
-To start fresh:
-
-```bash
-del logs\checkpoint_unified.json
+DOWNLOAD_FOLDER=downloads       # Where CVs are saved
+LOG_FOLDER=logs                 # Logs and checkpoints
 ```
 
 ## File Structure
 
 ```
 indeed-cv-downloader/
-├── dist/                       # Standalone executables
-│   ├── IndeedCVDownloader.exe  # Main application
-│   └── ConvertCookies.exe      # Cookie converter
-├── indeed_downloader.py        # Main unified script
-├── convert_cookies.py          # Cookie converter utility
+├── indeed_downloader.py        # Main script (single file, everything included)
+├── dist/
+│   └── IndeedCVDownloader.exe  # Standalone executable
 ├── requirements.txt            # Python dependencies
-├── .env.config                 # Configuration file
-├── downloads/                  # Downloaded CVs organized by job
-│   ├── Job Title (DD-MM-YYYY)/
-│   │   ├── Candidate_Name_timestamp.pdf
-│   │   └── checkpoint.json
-│   └── ...
-└── logs/                       # Logs and checkpoints
-    ├── checkpoint_unified.json # Global resume state
-    ├── indeed_cookies.txt      # Exported cookies (Netscape)
-    └── indeed_cookies.json     # Converted cookies (JSON)
+├── .env.config                 # Configuration (optional)
+├── downloads/                  # Downloaded CVs, organized by job
+│   ├── Business Developer (22-09-2025)/
+│   │   ├── Jean_Dupont_20251126_154317.pdf
+│   │   ├── Marie_Martin_20251126_154320.pdf
+│   │   ├── no_cv.txt           # Candidates without CV
+│   │   ├── stats.json          # Job download statistics
+│   │   └── checkpoint.json     # Resume state for this job
+│   └── rapport_telechargement.txt  # Global download report
+└── logs/
+    ├── indeed_cookies.json     # Auto-saved session cookies
+    └── checkpoint_unified.json # Global resume state
 ```
 
 ## Troubleshooting
 
-### Cookies expired
-Re-export cookies from your browser and run `convert_cookies.py` again.
-
-### Chrome profile error
-Close all Chrome windows before running the script.
-
-### Missing jobs in list
-The script now uses HTML table pagination. If some jobs are missing, check if the page loaded correctly.
-
-### Download verification failed
-Increase `DOWNLOAD_DELAY` in `.env.config`.
-
-## Important Notes
-
-- Uses your active browser session (no password storage)
-- Cookies expire after ~24 hours, re-export when needed
-- All downloaded CVs are saved with timestamps
-- Checkpoint system ensures no duplicates
+| Problem | Solution |
+|---------|----------|
+| Cookies expired | Just re-run — the script will detect it and ask you to log in again |
+| Chrome won't open | Close all existing Chrome windows first |
+| Jobs missing from list | Check if the page loaded correctly, increase `PAGE_LOAD_DELAY` |
+| Downloads failing | Increase `DOWNLOAD_DELAY` in `.env.config` |
+| Script interrupted | Re-run it — checkpoint picks up where you left off |
 
 ## Legal & Ethics
 
@@ -236,141 +205,52 @@ MIT License - See LICENSE file for details
 
 Pull requests welcome. For major changes, open an issue first.
 
-## Support
-
-For issues or questions, open a GitHub issue with:
-- Error message from logs
-- Configuration used
-- Steps to reproduce
-
 ---
 
 ## Changelog
 
-### v2.5.0 (2025-11-27)
+### v3.0.0
+
+**Breaking Changes:**
+- **Integrated authentication**: No more browser extension or cookie conversion needed
+- Removed `convert_cookies.py` and `ConvertCookies.exe` (no longer needed)
+- Single script does everything
 
 **New Features:**
-- **Download report**: Generates `rapport_telechargement.txt` with detailed summary:
-  - Per-job stats: announced vs recovered candidates, archived/lost, downloaded, skipped, no CV
-  - Global totals with complete breakdown
-- **Job completion tracking**: Uses `stats.json` in each job folder to accurately track processed candidates
-- **Archived candidates handling**: Uses recovered count (not announced) for completion tracking - archived candidates by Indeed are ignored
+- **Auto-detect login status**: Checks if saved cookies are still valid on startup
+- **Interactive login flow**: Opens Chrome and waits for you to log in, then captures cookies automatically
+- **Cookie persistence**: Saves cookies to `logs/indeed_cookies.json` for reuse across sessions
 
-**Bug Fixes:**
-- Fixed job marked as `[NEW]` when already complete (now uses exact processed count instead of PDF count)
-- Fixed infinite `[NEW]` loop for partially archived jobs (e.g., 680 recovered / 1656 announced → now marked as complete)
+**Improvements:**
+- Replaced all bare `except: pass` with specific exception types
+- Added `PARALLEL_DOWNLOADS` to configuration
+- Improved error handling throughout
+- Cleaner code organization
+
+### v2.5.0 (2025-11-27)
+
+- Download report generation (`rapport_telechargement.txt`)
+- Job completion tracking with `stats.json`
+- Archived candidates handling
 
 ### v2.4.0 (2025-11-27)
 
-**New Features:**
-- **Auto-filter old jobs**: Jobs older than 2 years are automatically skipped (Indeed archives candidate data after ~2 years)
-- **Tracks candidates without CV**: Saves names of candidates without CV to `no_cv.txt` in job folder
-- **Archived jobs stats**: Shows count of jobs with no data available in final statistics
-- **Multi-pass uses job total**: Now uses the actual candidate count from job listing (not API limit) to trigger multi-pass fetch
+- Auto-filter jobs older than 2 years
+- Track candidates without CV (`no_cv.txt`)
 
-**Improvements:**
-- Suppressed Chrome console errors (GCM deprecated endpoint messages)
-- Better handling of archived/old jobs with clear messaging
-- Removed checkpoint-based filtering (job name + date is the only identifier needed)
-- Clearer output: shows candidates with CV, without CV, and already processed separately
+### v2.3.x (2025-11-27)
 
-### v2.3.3 (2025-11-27)
-
-**Improvements:**
-- **Name-based duplicate detection**: Now compares by candidate name (from PDF filenames) instead of relying on checkpoint
-- **Multi-pass only when needed**: Additional API passes (date ASC/DESC, name A-Z/Z-A) only run when >3000 candidates
-- **Simpler logic**: PDF filenames are the single source of truth for already downloaded CVs
-- Shows count of existing CVs found in folder before downloading
-
-### v2.3.2 (2025-11-27)
-
-**Bug Fixes:**
-- **Fixed folder detection for completed jobs**: Existing folders are now checked against ALL jobs before filtering by checkpoint
-- **Fixed job ID extraction**: Jobs without `employerJobId` in URL now get a generated ID from title+date
-- **Completed jobs visibility**: Shows count of jobs already in checkpoint that are skipped
-
-**Improvements:**
-- Cleaner output: removed verbose debug logs, kept summary counts
-- Better handling of jobs with missing IDs
-
-### v2.3.1 (2025-11-27)
-
-**Bug Fixes:**
-- **Fixed duplicate folder matching**: Each folder now matches only one job (no more duplicates in the list)
-- **Date-based matching**: Jobs with the same name are now correctly distinguished by their publication date
-- **Improved accuracy**: If both job and folder have dates, they MUST match for the folder to be considered existing
-
-**Improvements:**
-- Matching priority: exact name+date > exact name (no date) > partial name+date > partial name (no date)
-- Display shows job date to help identify which job matches which folder
-
-### v2.3.0 (2025-11-27)
-
-**New Features:**
-- **Auto-close modals**: Automatically closes popups/modals when navigating to jobs
-- **Better folder matching**: Normalized comparison (removes accents, special chars) for matching job names with existing folders
-
-**Improvements:**
-- Partial name matching for existing folders (if one name contains the other)
-- Press ESC key to close any remaining modals
+- Auto-close modals, normalized name matching, duplicate detection fixes
 
 ### v2.2.0 (2025-11-27)
 
-**New Features:**
-- **Multi-pass fetch to bypass Indeed's 3000 limit**: Fetches candidates using multiple sort strategies (date ASC/DESC, name ASC/DESC) to recover up to ~12000 candidates
-- **Smart existing folder detection**: Scans existing PDF files to detect already downloaded candidates even without checkpoint
-- **Per-job checkpoint**: Each job folder has its own `checkpoint.json` for accurate tracking
-
-**Improvements:**
-- 5 passes to maximize candidate recovery:
-  - Pass 1: Sort by date (oldest first)
-  - Pass 2: Sort by date (newest first)
-  - Pass 3: Sort by name (A to Z)
-  - Pass 4: Sort by name (Z to A)
-  - Pass 5: By individual disposition status (if >1000 still missing)
-- Shows percentage of candidates recovered when API limit is hit
-- Better deduplication using legacy_id
+- Multi-pass fetch to bypass 3000 candidate limit
+- Per-job checkpoint system
 
 ### v2.1.0 (2025-11-27)
 
-**New Features:**
-- Unified script `indeed_downloader.py` replaces all previous scripts
-- Interactive menu for mode selection (Backend/Frontend, Single/All jobs)
-- HTML table parsing with pagination for reliable job fetching
-- Status filter in URL (`open`, `paused`, `closed`)
-- Display all jobs with cleaned names after fetching
-- New option `[N] NewOnly` to download only jobs with new candidates
-
-**Improvements:**
-- Clean job titles: removes `(H/F)`, `H/F`, replaces `/` with `-`
-- Better folder matching with cleaned names
-- Shows CV count vs total candidates for existing folders
-- Improved pagination with scroll and wait times
-
-**Removed:**
-- `indeed_jobs_manager.py` (merged into main script)
-- `indeed_parallel.py` (merged into main script)
-- `indeed_with_cookies.py` (merged into main script)
-- `capture_requests.py` (debug script)
-
-### v2.0.0 (2025-11-27)
-
-**New Features:**
-- Multi-job management system
-- Compare jobs with existing download folders
-- Detect new candidates since last download
-- Organize downloads by job folder
-
-### v1.1.0 (2025-11-20)
-
-**New Features:**
-- Parallel download via GraphQL API
-- Automatic header capture from network requests
+- Unified single script, interactive menu, HTML table parsing
 
 ### v1.0.0 (2025-11-15)
 
-**Initial Release:**
-- Cookie-based authentication
-- Checkpoint system for resume on interruption
-- Smart skip for already downloaded candidates
-- Standalone executables
+- Initial release

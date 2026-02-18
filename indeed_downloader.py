@@ -181,32 +181,20 @@ class IndeedDownloader:
         print("=" * 60)
         print()
 
-    def setup_chrome(self) -> bool:
-        """Setup Chrome with cookies"""
+    def _init_chrome(self):
+        """Initialize Chrome browser with options"""
         print("🌐 Ouverture de Chrome...")
 
-        # Load cookies
-        cookies_file = Path(self.log_folder) / 'indeed_cookies.json'
-        if not cookies_file.exists():
-            print(f"❌ Fichier cookies non trouvé: {cookies_file}")
-            return False
-
-        with open(cookies_file, 'r', encoding='utf-8') as f:
-            cookies_list = json.load(f)
-
-        # Install chromedriver
         chromedriver_autoinstaller.install()
 
-        # Setup Chrome options
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--log-level=3')  # Suppress Chrome logs
+        chrome_options.add_argument('--log-level=3')
         chrome_options.add_argument('--silent')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
 
-        # Download preferences
         prefs = {
             "download.default_directory": str(Path(self.download_folder).absolute()),
             "download.prompt_for_download": False,
@@ -219,11 +207,25 @@ class IndeedDownloader:
         self.driver.maximize_window()
         self.wait = WebDriverWait(self.driver, 30)
 
-        # Go to Indeed and add cookies
-        print("✅ Création d'une session avec vos cookies")
+    def _load_saved_cookies(self) -> list:
+        """Load cookies from saved JSON file if it exists"""
+        cookies_file = Path(self.log_folder) / 'indeed_cookies.json'
+        if cookies_file.exists():
+            try:
+                with open(cookies_file, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                if cookies and len(cookies) > 0:
+                    return cookies
+            except (json.JSONDecodeError, IOError):
+                pass
+        return []
+
+    def _inject_cookies(self, cookies_list: list):
+        """Inject cookies into the browser session"""
         self.driver.get("https://employers.indeed.com")
         time.sleep(2)
 
+        injected = 0
         for cookie in cookies_list:
             try:
                 cookie_dict = {
@@ -237,24 +239,155 @@ class IndeedDownloader:
 
                 if cookie['name'] == 'CTK':
                     self.ctk = cookie['value']
-            except:
-                pass
+                injected += 1
+            except Exception:
+                continue
 
         self.driver.refresh()
         time.sleep(3)
+        return injected
 
-        # Capture API key from network logs
+    def _is_logged_in(self) -> bool:
+        """Check if we are logged in to Indeed Employer dashboard"""
+        try:
+            current_url = self.driver.current_url
+            # If redirected to login/auth page, not logged in
+            if any(x in current_url for x in ['/auth', '/login', 'secure.indeed.com', 'accounts.indeed.com']):
+                return False
+            # Check for employer dashboard elements
+            is_employer = self.driver.execute_script("""
+                return !!(
+                    document.querySelector('[data-testid="job-row"]') ||
+                    document.querySelector('[data-testid="nav-employer"]') ||
+                    document.querySelector('.gnav-header-UserMenu') ||
+                    document.querySelector('[data-testid="header-user-menu"]') ||
+                    document.querySelector('[data-testid="candidates-pipeline"]') ||
+                    document.querySelector('.css-1f9ew9y') ||
+                    (window.location.hostname === 'employers.indeed.com' &&
+                     !window.location.pathname.includes('/auth'))
+                );
+            """)
+            return is_employer
+        except Exception:
+            return False
+
+    def _capture_browser_cookies(self) -> list:
+        """Capture all Indeed cookies from the current browser session"""
+        cookies = self.driver.get_cookies()
+        indeed_cookies = []
+        for cookie in cookies:
+            if 'indeed' in cookie.get('domain', ''):
+                indeed_cookies.append({
+                    'name': cookie['name'],
+                    'value': cookie['value'],
+                    'domain': cookie.get('domain', '.indeed.com'),
+                    'path': cookie.get('path', '/'),
+                    'secure': cookie.get('secure', False),
+                    'httpOnly': cookie.get('httpOnly', False),
+                    'expiry': cookie.get('expiry', 0)
+                })
+                self.cookies[cookie['name']] = cookie['value']
+                if cookie['name'] == 'CTK':
+                    self.ctk = cookie['value']
+        return indeed_cookies
+
+    def _save_cookies(self, cookies: list):
+        """Save cookies to JSON file for future sessions"""
+        cookies_file = Path(self.log_folder) / 'indeed_cookies.json'
+        with open(cookies_file, 'w', encoding='utf-8') as f:
+            json.dump(cookies, f, indent=2, ensure_ascii=False)
+        print(f"   ✅ {len(cookies)} cookies sauvegardés pour les prochaines sessions")
+
+    def _wait_for_login(self):
+        """Wait for user to manually log in to Indeed Employer"""
+        print()
+        print("=" * 60)
+        print("🔐 CONNEXION REQUISE")
+        print("=" * 60)
+        print()
+        print("   Connectez-vous à votre compte Indeed Employer")
+        print("   dans la fenêtre Chrome qui vient de s'ouvrir.")
+        print()
+        print("   En attente de connexion...")
+        print()
+
+        # Navigate to the login page
+        self.driver.get("https://employers.indeed.com")
+        time.sleep(2)
+
+        # Wait for login (check every 3 seconds, max 5 minutes)
+        max_wait = 300  # 5 minutes
+        elapsed = 0
+        while elapsed < max_wait:
+            time.sleep(3)
+            elapsed += 3
+
+            try:
+                current_url = self.driver.current_url
+                # Check if we've been redirected to the employer dashboard
+                if 'employers.indeed.com' in current_url and '/auth' not in current_url:
+                    if self._is_logged_in():
+                        print("   ✅ Connexion détectée!")
+                        return True
+            except Exception:
+                continue
+
+            # Show progress every 30 seconds
+            if elapsed % 30 == 0:
+                print(f"   ⏳ En attente... ({elapsed}s)")
+
+        print("   ❌ Délai d'attente dépassé (5 minutes)")
+        return False
+
+    def setup_chrome(self) -> bool:
+        """Setup Chrome and authenticate - uses saved cookies or interactive login"""
+        self._init_chrome()
+
+        # Try to load saved cookies first
+        saved_cookies = self._load_saved_cookies()
+
+        if saved_cookies:
+            print("🔑 Cookies sauvegardés trouvés, tentative de connexion...")
+            self._inject_cookies(saved_cookies)
+
+            # Navigate to employer dashboard to check if session is valid
+            self.driver.get("https://employers.indeed.com/candidates")
+            time.sleep(4)
+
+            if self._is_logged_in():
+                print("✅ Connecté avec les cookies sauvegardés")
+                self._capture_api_key()
+                return True
+            else:
+                print("⚠️  Cookies expirés ou invalides")
+
+        # No valid cookies - ask user to log in manually
+        if not self._wait_for_login():
+            return False
+
+        # Give the page time to fully load after login
+        time.sleep(3)
+
+        # Capture and save cookies from the authenticated session
+        cookies = self._capture_browser_cookies()
+        if cookies:
+            self._save_cookies(cookies)
+        else:
+            print("   ⚠️  Aucun cookie Indeed capturé")
+
+        # Navigate to candidates page and capture API key
         self._capture_api_key()
 
-        print(f"✅ {len(cookies_list)} cookies chargés")
+        print("✅ Authentification réussie!")
         return True
 
     def _capture_api_key(self):
         """Capture API key from network logs"""
         try:
-            # Navigate to candidates to trigger API calls
-            self.driver.get("https://employers.indeed.com/candidates")
-            time.sleep(5)
+            current_url = self.driver.current_url
+            if 'candidates' not in current_url:
+                self.driver.get("https://employers.indeed.com/candidates")
+                time.sleep(5)
 
             logs = self.driver.get_log('performance')
             for log in logs:
@@ -267,12 +400,12 @@ class IndeedDownloader:
                             if 'indeed-api-key' in headers:
                                 self.api_key = headers['indeed-api-key']
                                 break
-                except:
+                except (KeyError, json.JSONDecodeError):
                     continue
 
             if self.api_key:
                 print(f"   ✅ API Key capturée")
-        except:
+        except Exception:
             pass
 
     def _clean_job_title(self, title: str) -> str:
@@ -315,7 +448,7 @@ class IndeedDownloader:
             try:
                 with open(stats_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
+            except (json.JSONDecodeError, IOError):
                 pass
         return None
 
@@ -366,7 +499,7 @@ class IndeedDownloader:
                         if btn.is_displayed():
                             btn.click()
                             time.sleep(0.3)
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     continue
 
             # Also try pressing Escape key
@@ -375,10 +508,10 @@ class IndeedDownloader:
                 body = self.driver.find_element(By.TAG_NAME, "body")
                 body.send_keys(Keys.ESCAPE)
                 time.sleep(0.3)
-            except:
+            except (NoSuchElementException, Exception):
                 pass
 
-        except:
+        except Exception:
             pass
 
     def _extract_job_id_from_url(self, url: str) -> Optional[str]:
@@ -388,7 +521,7 @@ class IndeedDownloader:
             params = parse_qs(parsed.query)
             if 'selectedJobs' in params:
                 return unquote(params['selectedJobs'][0])
-        except:
+        except (ValueError, KeyError, IndexError):
             pass
         return None
 
@@ -555,7 +688,7 @@ class IndeedDownloader:
             """)
             self._create_job_folder(job_name)
             print(f"📁 Dossier: {self.current_job_folder}")
-        except:
+        except Exception:
             pass
 
         self._download_all_candidates_api()
@@ -580,7 +713,7 @@ class IndeedDownloader:
                     job_data = json.load(f)
                     downloaded_ids.update(job_data.get('downloaded_ids', []))
                     downloaded_names.update(job_data.get('downloaded_names', []))
-            except:
+            except (json.JSONDecodeError, IOError):
                 pass
 
         # Scan existing PDF files to get names (only for existing jobs with new candidates)
@@ -610,7 +743,7 @@ class IndeedDownloader:
                     job_data = json.load(f)
                     if 'downloaded_names' not in job_data:
                         job_data['downloaded_names'] = []
-            except:
+            except (json.JSONDecodeError, IOError):
                 pass
 
         # Add new id
@@ -663,7 +796,7 @@ class IndeedDownloader:
                             'legacy_id': legacy_id,
                             'download_url': download_url  # Can be None if no CV
                         }
-                except:
+                except (KeyError, TypeError):
                     continue
 
             if len(matches) < 100:
@@ -870,7 +1003,7 @@ class IndeedDownloader:
             """)
             self._create_job_folder(job_name)
             print(f"📁 Dossier: {self.current_job_folder}")
-        except:
+        except Exception:
             pass
 
         self._download_all_candidates_frontend()
@@ -918,7 +1051,7 @@ class IndeedDownloader:
                 return el ? el.textContent.trim() : null;
             """)
             return name
-        except:
+        except Exception:
             return None
 
     def _download_cv_frontend(self, name: str) -> bool:
@@ -1034,7 +1167,7 @@ class IndeedDownloader:
                 day = parts[1].replace(',', '').zfill(2)
                 year = parts[2]
                 return f"{day}-{month}-{year}"
-        except:
+        except (IndexError, ValueError):
             pass
         return date_str
 
@@ -1052,13 +1185,13 @@ class IndeedDownloader:
 
                     try:
                         title_elem = row.find_element(By.CSS_SELECTOR, "span[data-testid='UnifiedJobTldTitle'] a")
-                    except:
+                    except NoSuchElementException:
                         pass
 
                     if not title_elem:
                         try:
                             title_elem = row.find_element(By.CSS_SELECTOR, "a[data-testid='UnifiedJobTldLink']")
-                        except:
+                        except NoSuchElementException:
                             pass
 
                     if not title_elem:
@@ -1082,7 +1215,7 @@ class IndeedDownloader:
                         date_match = re.search(r'(\w+ \d+, \d+)', date_title)
                         date_str = date_match.group(1) if date_match else ""
                         date_formatted = self._format_date_fr(date_str)
-                    except:
+                    except (NoSuchElementException, AttributeError):
                         pass
 
                     # Nombre de candidats
@@ -1090,7 +1223,7 @@ class IndeedDownloader:
                     try:
                         candidates_elem = row.find_element(By.CSS_SELECTOR, "span[data-testid='candidates-pipeline-hosted-all-count']")
                         total_candidates = int(candidates_elem.text)
-                    except:
+                    except (NoSuchElementException, ValueError):
                         pass
 
                     # Statut - essayer plusieurs sélecteurs
@@ -1106,7 +1239,7 @@ class IndeedDownloader:
                             status = 'PAUSED'
                         elif 'fermé' in status_text or 'clos' in status_text or 'closed' in status_text:
                             status = 'CLOSED'
-                    except:
+                    except NoSuchElementException:
                         pass
 
                     # Extraire l'employerJobId du lien
@@ -1137,7 +1270,7 @@ class IndeedDownloader:
                         'job_link': job_link
                     })
 
-                except:
+                except (NoSuchElementException, StaleElementReferenceException, ValueError):
                     continue
 
         except Exception as e:
@@ -1150,7 +1283,7 @@ class IndeedDownloader:
         try:
             next_btn = self.driver.find_element(By.ID, "ejsJobListPaginationNextBtn")
             return not next_btn.get_attribute('disabled')
-        except:
+        except NoSuchElementException:
             return False
 
     def _click_next_page(self) -> bool:
@@ -1199,7 +1332,7 @@ class IndeedDownloader:
             WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "tr[data-testid='job-row']"))
             )
-        except:
+        except TimeoutException:
             print("Tableau des jobs non trouve")
             return []
 
@@ -1210,7 +1343,7 @@ class IndeedDownloader:
         try:
             total_text = self.driver.find_element(By.CSS_SELECTOR, "span[data-testid='job-count'], .css-1f9ew9y").text
             print(f"   Total affiche sur la page: {total_text}")
-        except:
+        except NoSuchElementException:
             pass
 
         all_jobs = []
@@ -1533,7 +1666,7 @@ class IndeedDownloader:
                     if parsed_date < two_years_ago:
                         old_jobs_count += 1
                         continue
-                except:
+                except ValueError:
                     pass
             filtered_jobs.append(job)
 
