@@ -1,0 +1,182 @@
+{"date": "2026-05-03", "clones": {
+  "count": 72,
+  "uniques": 53,
+  "clones": [
+    {
+      "timestamp": "2026-04-18T00:00:00Z",
+      "count": 2,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-04-19T00:00:00Z",
+      "count": 11,
+      "uniques": 7
+    },
+    {
+      "timestamp": "2026-04-20T00:00:00Z",
+      "count": 8,
+      "uniques": 8
+    },
+    {
+      "timestamp": "2026-04-21T00:00:00Z",
+      "count": 10,
+      "uniques": 10
+    },
+    {
+      "timestamp": "2026-04-22T00:00:00Z",
+      "count": 5,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-04-23T00:00:00Z",
+      "count": 4,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-04-24T00:00:00Z",
+      "count": 8,
+      "uniques": 5
+    },
+    {
+      "timestamp": "2026-04-25T00:00:00Z",
+      "count": 4,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-04-26T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-04-27T00:00:00Z",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-04-28T00:00:00Z",
+      "count": 5,
+      "uniques": 5
+    },
+    {
+      "timestamp": "2026-04-29T00:00:00Z",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-04-30T00:00:00Z",
+      "count": 6,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-05-01T00:00:00Z",
+      "count": 4,
+      "uniques": 3
+    }
+  ]
+}, "views": {
+  "count": 171,
+  "uniques": 71,
+  "views": [
+    {
+      "timestamp": "2026-04-18T00:00:00Z",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-04-19T00:00:00Z",
+      "count": 0,
+      "uniques": 0
+    },
+    {
+      "timestamp": "2026-04-20T00:00:00Z",
+      "count": 17,
+      "uniques": 6
+    },
+    {
+      "timestamp": "2026-04-21T00:00:00Z",
+      "count": 13,
+      "uniques": 6
+    },
+    {
+      "timestamp": "2026-04-22T00:00:00Z",
+      "count": 18,
+      "uniques": 7
+    },
+    {
+      "timestamp": "2026-04-23T00:00:00Z",
+      "count": 18,
+      "uniques": 6
+    },
+    {
+      "timestamp": "2026-04-24T00:00:00Z",
+      "count": 21,
+      "uniques": 7
+    },
+    {
+      "timestamp": "2026-04-25T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-04-26T00:00:00Z",
+      "count": 10,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-04-27T00:00:00Z",
+      "count": 6,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-04-28T00:00:00Z",
+      "count": 33,
+      "uniques": 9
+    },
+    {
+      "timestamp": "2026-04-29T00:00:00Z",
+      "count": 17,
+      "uniques": 10
+    },
+    {
+      "timestamp": "2026-04-30T00:00:00Z",
+      "count": 5,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-05-01T00:00:00Z",
+      "count": 10,
+      "uniques": 8
+    }
+  ]
+}, "referrers": [
+  {
+    "referrer": "Google",
+    "count": 91,
+    "uniques": 42
+  },
+  {
+    "referrer": "reddit.com",
+    "count": 11,
+    "uniques": 10
+  },
+  {
+    "referrer": "github.com",
+    "count": 5,
+    "uniques": 1
+  },
+  {
+    "referrer": "Bing",
+    "count": 2,
+    "uniques": 2
+  },
+  {
+    "referrer": "search.brave.com",
+    "count": 2,
+    "uniques": 2
+  },
+  {
+    "referrer": "claude.ai",
+    "count": 1,
+    "uniques": 1
+  }
+]}
