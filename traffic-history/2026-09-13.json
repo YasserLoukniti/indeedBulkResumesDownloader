@@ -1,0 +1,177 @@
+{"date": "2026-09-13", "clones": {
+  "count": 60,
+  "uniques": 42,
+  "clones": [
+    {
+      "timestamp": "2026-08-29T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-08-30T00:00:00Z",
+      "count": 10,
+      "uniques": 5
+    },
+    {
+      "timestamp": "2026-08-31T00:00:00Z",
+      "count": 3,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-09-01T00:00:00Z",
+      "count": 0,
+      "uniques": 0
+    },
+    {
+      "timestamp": "2026-09-02T00:00:00Z",
+      "count": 24,
+      "uniques": 18
+    },
+    {
+      "timestamp": "2026-09-03T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-09-04T00:00:00Z",
+      "count": 3,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-09-05T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-09-06T00:00:00Z",
+      "count": 3,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-09-07T00:00:00Z",
+      "count": 4,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-09-08T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-09-09T00:00:00Z",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-09-10T00:00:00Z",
+      "count": 4,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-09-11T00:00:00Z",
+      "count": 3,
+      "uniques": 3
+    }
+  ]
+}, "views": {
+  "count": 225,
+  "uniques": 76,
+  "views": [
+    {
+      "timestamp": "2026-08-29T00:00:00Z",
+      "count": 1,
+      "uniques": 1
+    },
+    {
+      "timestamp": "2026-08-30T00:00:00Z",
+      "count": 2,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-08-31T00:00:00Z",
+      "count": 12,
+      "uniques": 7
+    },
+    {
+      "timestamp": "2026-09-01T00:00:00Z",
+      "count": 4,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-09-02T00:00:00Z",
+      "count": 5,
+      "uniques": 4
+    },
+    {
+      "timestamp": "2026-09-03T00:00:00Z",
+      "count": 12,
+      "uniques": 7
+    },
+    {
+      "timestamp": "2026-09-04T00:00:00Z",
+      "count": 3,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-09-05T00:00:00Z",
+      "count": 4,
+      "uniques": 2
+    },
+    {
+      "timestamp": "2026-09-06T00:00:00Z",
+      "count": 8,
+      "uniques": 3
+    },
+    {
+      "timestamp": "2026-09-07T00:00:00Z",
+      "count": 24,
+      "uniques": 10
+    },
+    {
+      "timestamp": "2026-09-08T00:00:00Z",
+      "count": 22,
+      "uniques": 8
+    },
+    {
+      "timestamp": "2026-09-09T00:00:00Z",
+      "count": 68,
+      "uniques": 13
+    },
+    {
+      "timestamp": "2026-09-10T00:00:00Z",
+      "count": 32,
+      "uniques": 13
+    },
+    {
+      "timestamp": "2026-09-11T00:00:00Z",
+      "count": 28,
+      "uniques": 3
+    }
+  ]
+}, "referrers": [
+  {
+    "referrer": "Google",
+    "count": 105,
+    "uniques": 54
+  },
+  {
+    "referrer": "github.com",
+    "count": 31,
+    "uniques": 4
+  },
+  {
+    "referrer": "Bing",
+    "count": 28,
+    "uniques": 3
+  },
+  {
+    "referrer": "reddit.com",
+    "count": 23,
+    "uniques": 10
+  },
+  {
+    "referrer": "teams.public.onecdn.static.microsoft",
+    "count": 2,
+    "uniques": 1
+  }
+]}
